@@ -141,6 +141,10 @@ stt-proxy config               # show effective config (secrets masked)
 stt-proxy config init          # create ~/.config/stt-proxy/config.toml
 ```
 
+Note: `stt-proxy start` polls for the daemon's PID file for up to 30 seconds
+before giving up — Python 3.14 cold starts (yandex SDK + grpc imports) can
+be slow.
+
 Log and PID file locations (managed by [`platformdirs`](https://pypi.org/project/platformdirs/)):
 
 | Platform | log file                                    | PID file                                          |
@@ -167,6 +171,11 @@ daemon would use, with secrets masked (`***<last 4>`). In daemon mode the
 file is read as a TOML source alongside shell env. Precedence (highest
 first): shell env → config.toml → defaults. The file is optional — if it
 doesn't exist, the daemon falls back to shell env only.
+
+If the config file exists but is malformed, `stt-proxy start` and
+`stt-proxy config` refuse to run with a clear error pointing at the file
+and the TOML line/column — no more digging through the log file to find
+the typo.
 
 > **Env-var precedence for the daemon**: the daemon reads *only* the process environment (whatever you `export` in the shell before `stt-proxy start`), plus the optional TOML config file above. It deliberately ignores `.env`. If you want to use `.env` values, run `set -a; . ./.env; set +a` before `stt-proxy start`, or stick with `task run` / `task dev` which DO load `.env`.
 

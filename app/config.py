@@ -41,8 +41,9 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import tomllib
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import (
@@ -232,6 +233,35 @@ def _config_file_path() -> Path:
     """
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")).expanduser()
     return base / "stt-proxy" / "config.toml"
+
+
+class ConfigFileError(Exception):
+    """Raised when the TOML config file is unreadable or malformed.
+
+    Carries a human-readable message that is safe to print to stderr.
+    """
+
+
+# Deliberate duplication of pydantic-settings' own TOML parse: we want to
+# validate the file *before* pydantic-settings touches it, so a malformed
+# file produces a clear CLI error instead of an opaque failure later.
+def _parse_config_file(path: Path) -> dict[str, Any]:
+    """Parse the TOML config file. Returns ``{}`` if the file doesn't exist.
+
+    Raises :class:`ConfigFileError` if the file exists but cannot be read
+    (permission denied, I/O error) or parsed (invalid TOML).
+    """
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigFileError(
+            f"Invalid TOML in {path}: {type(exc).__name__}: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise ConfigFileError(f"Cannot read config file {path}: {exc}") from exc
 
 
 def load_settings(

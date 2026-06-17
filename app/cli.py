@@ -12,6 +12,10 @@ Four subcommands, all routed through :func:`main`:
   see, with secrets masked. ``stt-proxy config init [--force]`` creates
   ``~/.config/stt-proxy/config.toml`` from a documented template.
 
+If ``~/.config/stt-proxy/config.toml`` exists but is malformed, both
+``start`` and ``config`` refuse to run with a clear error to stderr before
+doing any I/O.
+
 This module deliberately uses only the standard library so that installing
 the tool doesn't pull in any dependency beyond what the FastAPI app already
 needs (plus ``platformdirs``, which is shared with :mod:`app.daemon`).
@@ -26,7 +30,12 @@ import sys
 import time
 from typing import Sequence
 
-from .config import _config_file_path, load_settings
+from .config import (
+    ConfigFileError,
+    _config_file_path,
+    _parse_config_file,
+    load_settings,
+)
 from .daemon import DaemonPaths, is_running, read_pid, stop_daemon
 
 
@@ -117,6 +126,15 @@ def _cmd_start(_args: argparse.Namespace) -> int:
     paths = DaemonPaths.from_platformdirs()
     paths.ensure()
 
+    # Validate the config file up front so a malformed TOML produces a
+    # clear stderr error instead of "Failed to start; check log file…".
+    try:
+        _parse_config_file(_config_file_path())
+    except ConfigFileError as exc:
+        print(f"stt-proxy: {exc}", file=sys.stderr)
+        print("Fix the config file or remove it, then retry.", file=sys.stderr)
+        return 1
+
     pid = read_pid(paths.pid_file)
     if pid is not None and is_running(pid):
         print(f"already running (pid={pid})", file=sys.stderr)
@@ -146,13 +164,30 @@ def _cmd_start(_args: argparse.Namespace) -> int:
         close_fds=True,
     )
 
-    # Give the child a moment to write its PID file (or fail).
-    time.sleep(0.5)
+    # Poll for the daemon's PID file. The daemon can take a few seconds to
+    # start on cold Python (uvicorn + yandex SDK + grpc imports), so we wait
+    # up to 30s before giving up. 0.1s polling keeps the loop responsive
+    # without being wasteful.
+    deadline = time.monotonic() + 30.0
+    pid: int | None = None
+    while time.monotonic() < deadline:
+        pid = read_pid(paths.pid_file)
+        if pid is not None and is_running(pid):
+            break
+        if pid is not None:
+            # PID file written but process is gone — fail fast.
+            break
+        time.sleep(0.1)
+    else:
+        print(
+            f"Failed to start within 30s; check log file: {paths.log_file}",
+            file=sys.stderr,
+        )
+        return 1
 
-    pid = read_pid(paths.pid_file)
     if pid is None or not is_running(pid):
         print(
-            f"Failed to start; check log file: {paths.log_file}",
+            f"Daemon exited before becoming ready; check log file: {paths.log_file}",
             file=sys.stderr,
         )
         return 1
@@ -240,13 +275,26 @@ def _cmd_config_show(_args: argparse.Namespace) -> int:
     config file) and ``validate=False`` (so a no-provider state still
     renders instead of exiting).
     """
+    # Validate the config file up front so a malformed TOML produces a
+    # clear stderr error (same fail-fast behaviour as `stt-proxy start`).
+    try:
+        _parse_config_file(_config_file_path())
+    except ConfigFileError as exc:
+        print(f"stt-proxy: {exc}", file=sys.stderr)
+        return 1
+
     try:
         settings = load_settings(daemon=True, validate=False)
-    except SystemExit:
-        # Should not happen with validate=False, but be defensive.
-        raise
-    except Exception as exc:  # noqa: BLE001 -- surface any config error to the user
-        print(f"Failed to load configuration: {exc}", file=sys.stderr)
+    except ConfigFileError as exc:
+        # Defense-in-depth: catches the race where the file was valid at
+        # pre-validation but malformed by the time load_settings() read it.
+        print(f"stt-proxy: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 -- surface any other config error to the user
+        print(
+            f"Failed to load configuration: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     config_path = _config_file_path()
