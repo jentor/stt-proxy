@@ -1,0 +1,82 @@
+# https://taskfile.dev
+#
+# Main task catalogue for stt-proxy.
+# Dev-only tasks (auto-reload, format, etc.) live in Taskfile.dev.yml and
+# are merged in automatically by go-task.
+
+version: "3"
+
+includes:
+  dev:
+    taskfile: Taskfile.dev.yml
+    dir: .
+
+vars:
+  PYTHON: '{{ default "python" .PYTHON }}'
+  UV: '{{ default "uv" .UV }}'
+  HOST: '{{ default "127.0.0.1" .HOST }}'
+  PORT: '{{ default "8000" .PORT }}'
+
+tasks:
+  default:
+    desc: "List available tasks"
+    cmds:
+      - task --list
+
+  install:
+    desc: "Resolve and sync project dependencies via uv"
+    cmds:
+      - "{{.UV}} sync"
+
+  update:
+    desc: "Upgrade lockfile and reinstall"
+    cmds:
+      - "{{.UV}} lock --upgrade"
+      - "{{.UV}} sync"
+
+  add:
+    desc: "Add a runtime dependency (use --dev for development deps)"
+    cmds:
+      - "{{.UV}} add {{.CLI_ARGS}}"
+    silent: false
+
+  remove:
+    desc: "Remove a dependency"
+    cmds:
+      - "{{.UV}} remove {{.CLI_ARGS}}"
+    silent: false
+
+  run:
+    desc: "Run the proxy in production mode (HOST/PORT env or defaults)"
+    cmds:
+      - "{{.UV}} run python -m app.main"
+    env:
+      HOST: "{{.HOST}}"
+      PORT: "{{.PORT}}"
+
+  test:
+    desc: "Run pytest (adds a default [] suite if no tests exist yet)"
+    cmds:
+      - "{{.UV}} run pytest -v {{.CLI_ARGS}}"
+    silent: false
+
+  test-quick:
+    desc: "Run a quick import + smoke check without pytest"
+    cmds:
+      - "{{.UV}} run python -c 'from app.main import create_app; print(\"app imports OK\")'"
+
+  lint:
+    desc: "Run ruff lint"
+    cmds:
+      - "{{.UV}} run ruff check app {{.CLI_ARGS}}"
+
+  format-check:
+    desc: "Check formatting without changing files"
+    cmds:
+      - "{{.UV}} run ruff format --check app"
+
+  clean:
+    desc: "Remove caches and build artifacts"
+    cmds:
+      - "rm -rf .pytest_cache .ruff_cache .venv __pycache__ */__pycache__ */*/__pycache__"
+      - "find . -name '*.pyc' -delete"

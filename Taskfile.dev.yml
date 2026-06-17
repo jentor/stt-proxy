@@ -1,0 +1,46 @@
+# https://taskfile.dev
+#
+# Development-only tasks for stt-proxy.
+# Merged into Taskfile.yml automatically by go-task, so `task dev` and friends
+# are available alongside the production tasks.
+
+version: "3"
+
+vars:
+  PYTHON: '{{ default "python" .PYTHON }}'
+  UV: '{{ default "uv" .UV }}'
+  HOST: '{{ default "127.0.0.1" .HOST }}'
+  PORT: '{{ default "8000" .PORT }}'
+
+tasks:
+  dev:
+    desc: "Run the proxy with uvicorn auto-reload (Taskfile.dev)"
+    cmds:
+      - "{{.UV}} run uvicorn app.main:app --reload --host {{.HOST}} --port {{.PORT}}"
+    env:
+      HOST: "{{.HOST}}"
+      PORT: "{{.PORT}}"
+
+  format:
+    desc: "Auto-format with ruff"
+    cmds:
+      - "{{.UV}} run ruff format app"
+
+  format-and-lint:
+    desc: "Format then lint"
+    cmds:
+      - task: format
+      - task: lint
+
+  doctor:
+    desc: "Print versions of key tools (uv, python, ffmpeg)"
+    cmds:
+      - "echo 'uv:';      {{.UV}} --version"
+      - "echo 'python:';  {{.UV}} run python --version"
+      - "echo 'ffmpeg:';  ffmpeg -version 2>&1 | head -1 || echo 'ffmpeg NOT installed'"
+      - "echo 'task:';    task --version"
+
+  info:
+    desc: "Show what providers the current .env would enable"
+    cmds:
+      - "{{.UV}} run python scripts/info.py"
