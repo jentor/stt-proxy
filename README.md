@@ -54,19 +54,15 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 # 1. Clone and enter the project
 git clone <repo-url> stt-proxy && cd stt-proxy
 
-# 2. Install dependencies (uv manages .venv automatically)
-task install-deps
-# or: uv sync
-
-# 3. Configure credentials
+# 2. Configure credentials
 cp .env.example .env
 $EDITOR .env            # set at least one provider's keys
 
-# 4. Run the dev server with auto-reload
+# 3. Run the dev server with auto-reload
 task dev:serve
 # or: uv run uvicorn app.main:app --reload
 
-# 5. Send a test request
+# 4. Send a test request
 curl -sS -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
     -F model=yandex-general \
     -F file=@./hello.wav \
@@ -408,7 +404,7 @@ stt-proxy/
 ├── scripts/
 │   └── info.py            # `task dev:info` helper
 ├── pyproject.toml         # uv project + dependencies
-├── Taskfile.yml           # end-user tasks (install-tool, install-deps, run)
+├── Taskfile.yml           # end-user tasks (install-tool, run)
 ├── Taskfile.dev.yml       # developer tasks (included under the `dev:` namespace)
 ├── .env.example           # documented sample env
 ├── .gitignore
@@ -420,11 +416,7 @@ stt-proxy/
 ## Development workflow
 
 ```bash
-# Populate .venv for `task run` (usually unnecessary —
-# `uv run` auto-syncs; this is just for offline / reproducibility).
-task install-deps
-
-# OR: install the global CLI tool (creates the `stt-proxy` command on PATH)
+# Install the global CLI tool (creates the `stt-proxy` command on PATH)
 task install-tool
 
 # Run with auto-reload on code changes

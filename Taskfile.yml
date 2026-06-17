@@ -27,15 +27,12 @@ vars:
 # If .env doesn't exist, uv errors with "No environment file found at:
 # `.env`" before any Python code runs. Copy .env.example to .env first.
 #
-# Two install paths exist:
-#   * `task install-tool`  — `uv tool install -e .` registers a global
-#                            `stt-proxy` console command (start/stop/logs).
-#                            The daemon launched by `stt-proxy start`
-#                            ignores .env by design — it only sees env vars
-#                            exported in the calling shell (plus the
-#                            optional ~/.config/stt-proxy/config.toml file).
-#   * `task install-deps`  — `uv sync` populates .venv for `task run`.
-#                            Usually unnecessary — `uv run` auto-syncs.
+# Install: `task install-tool` registers a global `stt-proxy` command
+# (start / stop / logs / config). The daemon launched by `stt-proxy start`
+# ignores .env by design — it only sees env vars exported in the calling
+# shell (plus the optional ~/.config/stt-proxy/config.toml file). Dev
+# workflow setup needs no explicit sync task — `uv run` auto-syncs .venv
+# on first use; `uv sync` is one word when you want it explicit.
 
 tasks:
   default:
@@ -47,11 +44,6 @@ tasks:
     desc: "Install stt-proxy as a local uv tool (creates `stt-proxy` console command)"
     cmds:
       - "{{.UV}} tool install -e ."
-
-  install-deps:
-    desc: "Sync project dependencies to .venv (for `task run`). Usually unnecessary — `uv run` auto-syncs."
-    cmds:
-      - "{{.UV}} sync"
 
   run:
     desc: "Run the proxy in the foreground (no auto-reload). Reads STT_PROXY_* env vars from .env or shell. For auto-reload use `task dev:serve`; for a detached background daemon use `stt-proxy start` after `task install-tool`."

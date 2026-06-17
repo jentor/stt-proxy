@@ -3,7 +3,7 @@
 # Development-only tasks for stt-proxy.
 # Included from Taskfile.yml under the `dev:` namespace, so they appear in
 # `task --list` as `dev:lint`, `dev:test`, `dev:serve`, etc. — clearly
-# distinct from the end-user tasks (install-tool, install-deps, run) which
+# distinct from the end-user tasks (install-tool, run) which
 # stay at the top level.
 
 version: "3"
