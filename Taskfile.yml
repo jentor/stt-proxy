@@ -14,8 +14,16 @@ includes:
 vars:
   PYTHON: '{{ default "python" .PYTHON }}'
   UV: '{{ default "uv" .UV }}'
-  # Run uv with .env loaded if present. Falls back to plain uv run otherwise.
-  UV_RUN: scripts/with-dotenv.sh
+
+# All tasks that run uv-managed Python code pass .env via UV_ENV_FILE. uv
+# reads it into the subprocess environment so STT_PROXY_* values become
+# visible to `env | grep` for debugging; pydantic-settings in
+# app/config.py ALSO reads .env via env_file as a safety net, so the
+# values land in the Settings object even when uv is invoked without this
+# task (e.g. bare `python -m app.main`).
+#
+# If .env doesn't exist, uv errors with "No environment file found at:
+# `.env`" before any Python code runs. Copy .env.example to .env first.
 
 tasks:
   default:
@@ -48,19 +56,25 @@ tasks:
 
   run:
     desc: "Run the proxy in production mode. Reads STT_PROXY_* env vars from .env or shell."
+    env:
+      UV_ENV_FILE: .env
     cmds:
-      - "{{.UV_RUN}} python -m app.main"
+      - "{{.UV}} run python -m app.main"
 
   test:
     desc: "Run pytest (no tests yet, will exit 5)"
+    env:
+      UV_ENV_FILE: .env
     cmds:
-      - "{{.UV_RUN}} pytest -v {{.CLI_ARGS}}"
+      - "{{.UV}} run pytest -v {{.CLI_ARGS}}"
     silent: false
 
   test-quick:
     desc: "Quick import + smoke check without pytest (auto-loads .env)"
+    env:
+      UV_ENV_FILE: .env
     cmds:
-      - "{{.UV_RUN}} python -c 'from app.main import create_app; app = create_app(); print(\"app imports OK, routes:\", [r.path for r in app.routes if hasattr(r, \"path\")][:5])'"
+      - "{{.UV}} run python -c 'from app.main import create_app; app = create_app(); print(\"app imports OK, routes:\", [r.path for r in app.routes if hasattr(r, \"path\")][:5])'"
 
   lint:
     desc: "Run ruff lint"

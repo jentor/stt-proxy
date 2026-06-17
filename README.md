@@ -114,10 +114,12 @@ task dev:info
 `STT_PROXY_*` settings are resolved in this order (highest priority first):
 
 1. shell environment variables (e.g. `STT_PROXY_PORT=12000 task run`)
-2. `.env` file in the working directory (auto-loaded by both `scripts/with-dotenv.sh` via `uv run --env-file .env` and by pydantic-settings as a safety net)
+2. `.env` file in the working directory — auto-loaded by both:
+   - the Taskfile, which sets `UV_ENV_FILE=.env` in each task's `env:` block so `uv run` reads it into the subprocess OS environment
+   - pydantic-settings in `app/config.py`, which reads it via `env_file=".env"` as a safety net for bare `python -m app.main` invocations
 3. built-in defaults (see the table above)
 
-This means `STT_PROXY_PORT=9000 task run` always wins over whatever is in `.env`. And because `scripts/with-dotenv.sh` calls `uv run --env-file .env`, the `.env` values are visible in the subprocess OS environment too — handy for debugging:
+This means `STT_PROXY_PORT=9000 task run` always wins over whatever is in `.env`. And because uv reads `.env` into the subprocess env, the values are visible to `env | grep STT_PROXY_` for debugging.
 
 ```bash
 STT_PROXY_PORT=9000 task run

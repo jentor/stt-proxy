@@ -9,15 +9,15 @@ version: "3"
 vars:
   PYTHON: '{{ default "python" .PYTHON }}'
   UV: '{{ default "uv" .UV }}'
-  UV_RUN: scripts/with-dotenv.sh
 
 tasks:
   dev:
     desc: "Run the proxy with uvicorn auto-reload. Reads STT_PROXY_* env vars from .env or shell."
     env:
+      UV_ENV_FILE: .env
       STT_PROXY_RELOAD: "1"
     cmds:
-      - "{{.UV_RUN}} python -m app.main"
+      - "{{.UV}} run python -m app.main"
 
   format:
     desc: "Auto-format with ruff"
@@ -40,5 +40,7 @@ tasks:
 
   info:
     desc: "Show what providers the current .env would enable"
+    env:
+      UV_ENV_FILE: .env
     cmds:
-      - "{{.UV_RUN}} python scripts/info.py"
+      - "{{.UV}} run python scripts/info.py"
