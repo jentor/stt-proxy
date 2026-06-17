@@ -57,6 +57,19 @@ class TranscriptionRequest:
     timestamp_granularities: Sequence[str] = ()
 
 
+@dataclass(slots=True)
+class ModelInfo:
+    """A model advertised by a provider, in OpenAI-compatible shape.
+
+    ``id`` is the value the user passes in the request ``model`` field
+    (so it includes the routing prefix, e.g. ``yandex-general``).
+    ``owned_by`` identifies the upstream — matches ``Provider.name``.
+    """
+
+    id: str
+    owned_by: str
+
+
 class Provider(ABC):
     """Abstract STT provider."""
 
@@ -67,7 +80,18 @@ class Provider(ABC):
         """Run a transcription and return a normalized result."""
         raise NotImplementedError
 
+    def list_models(self) -> list[ModelInfo]:
+        """Return the list of models this provider exposes for ``GET /v1/models``.
 
+        Override for providers with dynamic model catalogues. The default
+        returns an empty list, which is the right behaviour for providers
+        that haven't been curated (or that genuinely expose no models).
+        """
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Routing helpers
 # ---------------------------------------------------------------------------
 # Routing helpers
 # ---------------------------------------------------------------------------

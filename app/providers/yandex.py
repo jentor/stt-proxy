@@ -13,6 +13,7 @@ from typing import Any
 
 from ..audio import NormalizedAudio, YANDEX_AUDIO_FORMAT_MAP
 from .base import (
+    ModelInfo,
     Provider,
     ProviderError,
     ProviderNotConfiguredError,
@@ -76,6 +77,20 @@ class YandexProvider(Provider):
 
     name = "yandex"
 
+    # Model tags accepted by AsyncRecognizer.RecognizeFile (SpeechKit v3):
+    #   https://yandex.cloud/ru-kz/docs/speechkit/stt-v3/api-ref/grpc/AsyncRecognizer/recognizeFile
+    # ``id`` includes the routing prefix so it matches what users pass
+    # in the request ``model`` field. ``yandex_model_tag()`` strips the
+    # prefix before calling the SDK.
+    _MODEL_TAGS: tuple[str, ...] = (
+        "general",
+        "general:rc",
+        "general:deprecated",
+        "deferred-general",
+        "deferred-general:rc",
+        "deferred-general:deprecated",
+    )
+
     def __init__(self, api_key: str, folder_id: str, default_model: str = "general"):
         if not api_key:
             raise ProviderNotConfiguredError("Yandex API key is empty")
@@ -86,6 +101,12 @@ class YandexProvider(Provider):
 
         self._sdk = AIStudio(folder_id=folder_id, auth=api_key)
         self._default_model = default_model
+
+    def list_models(self) -> list[ModelInfo]:
+        """Advertise every Yandex model tag we know how to route to."""
+        return [
+            ModelInfo(id=f"yandex-{tag}", owned_by="yandex") for tag in self._MODEL_TAGS
+        ]
 
     async def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         # Build the SpeechKit model descriptor. We have to peek inside the SDK

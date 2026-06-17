@@ -198,3 +198,38 @@ async def list_providers(request: Request) -> dict:
         ],
         "default_provider": settings.effective_default_provider(),
     }
+
+
+# OpenAI's ``/v1/models`` endpoint returns the list of models a client can
+# use. Our backend providers don't expose a model catalogue API (Yandex
+# takes a model tag, SaluteSpeech has no model list at all), so the
+# responses are static per provider. We aggregate them across every
+# enabled provider.
+_MODEL_CREATED_PLACEHOLDER: int = 0
+
+
+def _render_models(providers: dict) -> dict:
+    data: list[dict] = []
+    for provider in providers.values():
+        for model in provider.list_models():
+            data.append(
+                {
+                    "id": model.id,
+                    "object": "model",
+                    "created": _MODEL_CREATED_PLACEHOLDER,
+                    "owned_by": model.owned_by,
+                }
+            )
+    return {"object": "list", "data": data}
+
+
+@router.get("/v1/models")
+async def list_models(request: Request) -> dict:
+    """OpenAI-compatible model catalogue (aggregated across enabled providers)."""
+    return _render_models(request.app.state.providers)
+
+
+@router.get("/models")
+async def list_models_no_prefix(request: Request) -> dict:
+    """Alias for ``/v1/models`` — some clients hit the un-prefixed path."""
+    return _render_models(request.app.state.providers)

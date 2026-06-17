@@ -146,12 +146,24 @@ The console script `stt-proxy` is also installed in the venv:
 uv run stt-proxy
 ```
 
-### Health / inspection endpoint
+### Health / inspection endpoints
 
 ```bash
+# Which providers are enabled right now
 curl -sS http://127.0.0.1:8000/v1/audio/providers
 # => {"providers":[{"name":"yandex","enabled":true,"model":"general"},{"name":"salute","enabled":false,"model":null}],"default_provider":"yandex"}
+
+# OpenAI-compatible model catalogue (also available at /models)
+curl -sS http://127.0.0.1:8000/v1/models
+# => {"object":"list","data":[
+#       {"id":"yandex-general","object":"model","created":0,"owned_by":"yandex"},
+#       {"id":"yandex-general:rc","object":"model","created":0,"owned_by":"yandex"},
+#       ...
+#       {"id":"salute-speech","object":"model","created":0,"owned_by":"salute-speech"}
+#     ]}
 ```
+
+The model list is aggregated from every enabled provider. Since neither Yandex nor Salute expose a model catalogue API, the entries are static — they reflect the routing prefixes the proxy supports, not what the providers happen to accept on a given day. Use the `id` values in the `model` field of transcription requests.
 
 Interactive docs (Swagger UI) live at `http://127.0.0.1:8000/docs`.
 

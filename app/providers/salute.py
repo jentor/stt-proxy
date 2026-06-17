@@ -11,6 +11,7 @@ import io
 import logging
 
 from .base import (
+    ModelInfo,
     Provider,
     ProviderError,
     ProviderNotConfiguredError,
@@ -73,6 +74,14 @@ class SaluteProvider(Provider):
     """SaluteSpeech provider backed by the ``salute_speech`` SDK."""
 
     name = "salute"
+
+    def list_models(self) -> list[ModelInfo]:
+        """SaluteSpeech exposes no model catalogue API; we advertise one entry.
+
+        ``language`` and other knobs are configured per-request, not per-model,
+        so a single ``salute-speech`` id is enough.
+        """
+        return [ModelInfo(id="salute-speech", owned_by="salute-speech")]
 
     def __init__(self, credentials: str):
         if not credentials:
