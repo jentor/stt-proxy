@@ -57,17 +57,11 @@ class Settings(BaseSettings):
         description="Default Yandex STT model tag (general, general:rc, general:deprecated, deferred-general, ...)",
     )
 
-    # Salute Speech: single base64-encoded "client_id:client_secret" token.
-    # SBER_SALUTE_SPEECH_API_KEY is the documented name. The SDK also reads
-    # SBER_SPEECH_API_KEY; we accept both with the Salute-prefixed name taking
-    # precedence for clarity.
+    # Salute Speech: single base64-encoded "client_id:client_secret" token,
+    # as documented at https://developers.sber.ru/docs/ru/salutespeech/rest/post-token
     sber_salute_speech_api_key: str | None = Field(
         default=None,
-        description="Salute Speech authorization key (base64 of client_id:client_secret). Falls back to SBER_SPEECH_API_KEY.",
-    )
-    sber_speech_api_key: str | None = Field(
-        default=None,
-        description="Fallback env var read by salute_speech SDK directly",
+        description="Salute Speech authorization key: base64 of client_id:client_secret",
     )
 
     # ---- Routing -----------------------------------------------------------
@@ -90,10 +84,9 @@ class Settings(BaseSettings):
             )
             self._yandex_enabled = False
 
-        # Salute is enabled if either of the env vars is set.
-        salute_creds = self.sber_salute_speech_api_key or self.sber_speech_api_key
-        self._salute_enabled = bool(salute_creds)
-        self._salute_credentials = salute_creds
+        # Salute is enabled when its single credential is present.
+        self._salute_enabled = bool(self.sber_salute_speech_api_key)
+        self._salute_credentials = self.sber_salute_speech_api_key
 
         return self
 
@@ -133,7 +126,7 @@ class Settings(BaseSettings):
         if not providers:
             raise RuntimeError(
                 "No STT provider configured. Set YANDEX_API_KEY + YANDEX_FOLDER_ID for Yandex, "
-                "or SBER_SALUTE_SPEECH_API_KEY (or SBER_SPEECH_API_KEY) for Salute Speech."
+                "or SBER_SALUTE_SPEECH_API_KEY for Salute Speech."
             )
         default = self.effective_default_provider()
         if default is None:
@@ -152,7 +145,7 @@ def load_settings() -> Settings:
         msg = (
             "No STT provider configured.\n"
             "Set YANDEX_API_KEY + YANDEX_FOLDER_ID for Yandex SpeechKit, and/or\n"
-            "SBER_SALUTE_SPEECH_API_KEY (or SBER_SPEECH_API_KEY) for Salute Speech.\n"
+            "SBER_SALUTE_SPEECH_API_KEY for Salute Speech.\n"
             "Exiting."
         )
         print(msg, file=sys.stderr)

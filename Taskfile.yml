@@ -64,7 +64,7 @@ tasks:
     desc: "Run a quick import + smoke check without pytest (needs at least one provider's creds)"
     cmds:
       - cmd: |
-          if [ -z "${YANDEX_API_KEY:-}${SBER_SALUTE_SPEECH_API_KEY:-}${SBER_SPEECH_API_KEY:-}" ]; then
+          if [ -z "${YANDEX_API_KEY:-}${SBER_SALUTE_SPEECH_API_KEY:-}" ]; then
             echo 'set at least one provider env var before running test-quick' >&2
             exit 2
           fi

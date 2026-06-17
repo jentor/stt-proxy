@@ -90,14 +90,13 @@ All configuration is read from environment variables (and optionally a `.env` fi
 | `YANDEX_API_KEY` | _none_ | Yandex Cloud API key |
 | `YANDEX_FOLDER_ID` | _none_ | Yandex Cloud folder ID (must be set together with the API key) |
 | `YANDEX_MODEL` | `general` | Yandex STT model tag (`general`, `general:rc`, `deferred-general`, ...) |
-| `SBER_SALUTE_SPEECH_API_KEY` | _none_ | SaluteSpeech auth key: base64 of `client_id:client_secret` |
-| `SBER_SPEECH_API_KEY` | _none_ | Alias read by the `salute-speech` SDK directly |
+| `SBER_SALUTE_SPEECH_API_KEY` | _none_ | SaluteSpeech auth key: base64 of `client_id:client_secret` (see [SaluteSpeech docs](https://developers.sber.ru/docs/ru/salutespeech/rest/post-token)) |
 | `STT_DEFAULT_PROVIDER` | _auto_ | `yandex` or `salute` — used when both providers are configured and the request `model` has no prefix |
 
 ### Provider enable rules
 
 - **Yandex** is enabled only when **both** `YANDEX_API_KEY` and `YANDEX_FOLDER_ID` are present. Setting one without the other disables the provider with a warning.
-- **SaluteSpeech** is enabled when **either** `SBER_SALUTE_SPEECH_API_KEY` or `SBER_SPEECH_API_KEY` is non-empty.
+- **SaluteSpeech** is enabled when `SBER_SALUTE_SPEECH_API_KEY` is non-empty.
 - If neither provider is enabled, the process refuses to start (exit code `2`).
 - When exactly one provider is enabled, it is used for every request — `model` is passed through unchanged.
 - When both providers are enabled, `STT_DEFAULT_PROVIDER` decides which one is used for unprefixed `model` values; otherwise the request must use a prefixed model (`yandex-...` / `salute-...`).
