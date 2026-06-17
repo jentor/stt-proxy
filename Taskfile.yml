@@ -14,8 +14,6 @@ includes:
 vars:
   PYTHON: '{{ default "python" .PYTHON }}'
   UV: '{{ default "uv" .UV }}'
-  HOST: '{{ default "127.0.0.1" .HOST }}'
-  PORT: '{{ default "8000" .PORT }}'
 
 tasks:
   default:
@@ -47,12 +45,9 @@ tasks:
     silent: false
 
   run:
-    desc: "Run the proxy in production mode (HOST/PORT env or defaults)"
+    desc: "Run the proxy in production mode. Reads HOST/PORT (and creds) from .env or shell env."
     cmds:
       - "{{.UV}} run python -m app.main"
-    env:
-      HOST: "{{.HOST}}"
-      PORT: "{{.PORT}}"
 
   test:
     desc: "Run pytest (adds a default [] suite if no tests exist yet)"
@@ -61,7 +56,7 @@ tasks:
     silent: false
 
   test-quick:
-    desc: "Run a quick import + smoke check without pytest (needs at least one provider's creds)"
+    desc: "Run a quick import + smoke check without pytest (reads .env automatically via pydantic-settings)"
     cmds:
       - cmd: |
           if [ -z "${YANDEX_API_KEY:-}${SBER_SALUTE_SPEECH_API_KEY:-}" ]; then

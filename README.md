@@ -111,15 +111,22 @@ task dev:info
 
 ## Running the server
 
+`HOST`, `PORT`, credentials and the rest of the configuration are resolved in this order:
+
+1. shell environment variables (e.g. `PORT=12000 task run`)
+2. `.env` file in the working directory
+3. built-in defaults (see the table above)
+
 ```bash
 # Development (auto-reload on file change)
 task dev
-# or: HOST=127.0.0.1 PORT=9000 task dev
+# or: PORT=9000 task dev      # shell wins over .env
 
 # Production-style single worker
 task run
+# or: HOST=0.0.0.0 PORT=8080 task run
 
-# Direct python (lets you pass extra uvicorn args)
+# Direct uvicorn (bypasses our run() entry point)
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 

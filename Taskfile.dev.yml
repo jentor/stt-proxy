@@ -9,17 +9,14 @@ version: "3"
 vars:
   PYTHON: '{{ default "python" .PYTHON }}'
   UV: '{{ default "uv" .UV }}'
-  HOST: '{{ default "127.0.0.1" .HOST }}'
-  PORT: '{{ default "8000" .PORT }}'
 
 tasks:
   dev:
-    desc: "Run the proxy with uvicorn auto-reload (Taskfile.dev)"
-    cmds:
-      - "{{.UV}} run uvicorn app.main:app --reload --host {{.HOST}} --port {{.PORT}}"
+    desc: "Run the proxy with uvicorn auto-reload. Reads HOST/PORT (and creds) from .env or shell env."
     env:
-      HOST: "{{.HOST}}"
-      PORT: "{{.PORT}}"
+      STT_PROXY_RELOAD: "1"
+    cmds:
+      - "{{.UV}} run python -m app.main"
 
   format:
     desc: "Auto-format with ruff"

@@ -7,6 +7,7 @@ refuses to start when no provider credentials are present.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 
@@ -83,15 +84,22 @@ app = create_app()
 
 
 def run() -> None:
-    """Entry point used by ``stt-proxy`` console script and Taskfile."""
+    """Entry point used by ``stt-proxy`` console script and Taskfile.
+
+    Honours the ``STT_PROXY_RELOAD`` env var (set to ``1``/``true`` by the
+    dev task) to enable uvicorn's auto-reload. All other configuration
+    (host, port, workers, log level) comes from ``.env`` / shell env via
+    :func:`load_settings`.
+    """
     settings = load_settings()
+    reload_enabled = os.getenv("STT_PROXY_RELOAD", "").lower() in {"1", "true", "yes"}
     uvicorn.run(
         "app.main:app",
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
         workers=settings.workers,
-        reload=False,
+        reload=reload_enabled,
     )
 
 
