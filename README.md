@@ -40,7 +40,7 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 - ✅ Yandex SpeechKit STT v3 via [`yandex-ai-studio-sdk`](https://github.com/yandex-cloud/yandex-ai-studio-sdk)
 - ✅ SaluteSpeech via [`salute-speech`](https://github.com/mmua/salute_speech)
 - ✅ Automatic audio normalization via `ffmpeg` (mp4/webm/m4a/flac → WAV PCM16 16 kHz mono)
-- ✅ Provider selection by prefix (`yandex-general` → Yandex, `salute-speech` → Salute) or by `STT_DEFAULT_PROVIDER`
+- ✅ Provider selection by prefix (`yandex-general` → Yandex, `salute-speech` → Salute) or by `STT_PROXY_DEFAULT_PROVIDER`
 - ✅ Environment-driven configuration via `.env` / shell
 - ✅ Refuses to start when no provider credentials are configured
 - ✅ uv-managed Python project, runs on Python 3.12
@@ -79,27 +79,27 @@ If neither provider is configured, the process exits at startup with exit code `
 
 ## Configuration
 
-All configuration is read from environment variables (and optionally a `.env` file in the working directory). The full set lives in `.env.example`.
+All configuration is read from environment variables (and optionally a `.env` file in the working directory). **Every variable is namespaced under `STT_PROXY_`** — there's no need to remember per-provider prefixes. The full set lives in `.env.example`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `HOST` | `0.0.0.0` | HTTP bind address |
-| `PORT` | `8000` | HTTP bind port |
-| `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `WORKERS` | `1` | uvicorn workers (keep at 1 — provider SDKs may not be fork-safe) |
-| `YANDEX_API_KEY` | _none_ | Yandex Cloud API key |
-| `YANDEX_FOLDER_ID` | _none_ | Yandex Cloud folder ID (must be set together with the API key) |
-| `YANDEX_MODEL` | `general` | Yandex STT model tag (`general`, `general:rc`, `deferred-general`, ...) |
-| `SBER_SALUTE_SPEECH_API_KEY` | _none_ | SaluteSpeech auth key: base64 of `client_id:client_secret` (see [SaluteSpeech docs](https://developers.sber.ru/docs/ru/salutespeech/rest/post-token)) |
-| `STT_DEFAULT_PROVIDER` | _auto_ | `yandex` or `salute` — used when both providers are configured and the request `model` has no prefix |
+| `STT_PROXY_HOST` | `0.0.0.0` | HTTP bind address |
+| `STT_PROXY_PORT` | `8000` | HTTP bind port |
+| `STT_PROXY_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `STT_PROXY_WORKERS` | `1` | uvicorn workers (keep at 1 — provider SDKs may not be fork-safe) |
+| `STT_PROXY_YANDEX_API_KEY` | _none_ | Yandex Cloud API key |
+| `STT_PROXY_YANDEX_FOLDER_ID` | _none_ | Yandex Cloud folder ID (must be set together with the API key) |
+| `STT_PROXY_YANDEX_MODEL` | `general` | Yandex STT model tag (`general`, `general:rc`, `deferred-general`, ...) |
+| `STT_PROXY_SALUTESPEECH_KEY` | _none_ | SaluteSpeech auth key: base64 of `client_id:client_secret` (see [SaluteSpeech docs](https://developers.sber.ru/docs/ru/salutespeech/rest/post-token)) |
+| `STT_PROXY_DEFAULT_PROVIDER` | _auto_ | `yandex` or `salute` — used when both providers are configured and the request `model` has no prefix |
 
 ### Provider enable rules
 
-- **Yandex** is enabled only when **both** `YANDEX_API_KEY` and `YANDEX_FOLDER_ID` are present. Setting one without the other disables the provider with a warning.
-- **SaluteSpeech** is enabled when `SBER_SALUTE_SPEECH_API_KEY` is non-empty.
+- **Yandex** is enabled only when **both** `STT_PROXY_YANDEX_API_KEY` and `STT_PROXY_YANDEX_FOLDER_ID` are present. Setting one without the other disables the provider with a warning.
+- **SaluteSpeech** is enabled when `STT_PROXY_SALUTESPEECH_KEY` is non-empty.
 - If neither provider is enabled, the process refuses to start (exit code `2`).
 - When exactly one provider is enabled, it is used for every request — `model` is passed through unchanged.
-- When both providers are enabled, `STT_DEFAULT_PROVIDER` decides which one is used for unprefixed `model` values; otherwise the request must use a prefixed model (`yandex-...` / `salute-...`).
+- When both providers are enabled, `STT_PROXY_DEFAULT_PROVIDER` decides which one is used for unprefixed `model` values; otherwise the request must use a prefixed model (`yandex-...` / `salute-...`).
 
 Inspect the effective configuration with:
 
@@ -111,20 +111,28 @@ task dev:info
 
 ## Running the server
 
-`HOST`, `PORT`, credentials and the rest of the configuration are resolved in this order:
+`STT_PROXY_*` settings are resolved in this order (highest priority first):
 
-1. shell environment variables (e.g. `PORT=12000 task run`)
-2. `.env` file in the working directory
+1. shell environment variables (e.g. `STT_PROXY_PORT=12000 task run`)
+2. `.env` file in the working directory (auto-loaded by both `scripts/with-dotenv.sh` via `uv run --env-file .env` and by pydantic-settings as a safety net)
 3. built-in defaults (see the table above)
+
+This means `STT_PROXY_PORT=9000 task run` always wins over whatever is in `.env`. And because `scripts/with-dotenv.sh` calls `uv run --env-file .env`, the `.env` values are visible in the subprocess OS environment too — handy for debugging:
+
+```bash
+STT_PROXY_PORT=9000 task run
+# uvicorn binds 9000 (shell wins)
+
+task run
+# uvicorn binds to whatever STT_PROXY_PORT says in .env, or 8000 by default
+```
 
 ```bash
 # Development (auto-reload on file change)
 task dev
-# or: PORT=9000 task dev      # shell wins over .env
 
 # Production-style single worker
 task run
-# or: HOST=0.0.0.0 PORT=8080 task run
 
 # Direct uvicorn (bypasses our run() entry point)
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -246,7 +254,7 @@ The proxy decides which backend to call based on the request's `model` field:
 |---|---|
 | `yandex-*` / `yc-*` / `speechkit-*` | Yandex SpeechKit, the suffix becomes the model tag (e.g. `yandex-general:rc` → `general:rc`) |
 | `salute-*` / `sber-*` | SaluteSpeech |
-| Anything else (e.g. `whisper-1`) | `STT_DEFAULT_PROVIDER` if set, else the only configured provider (if there is exactly one), else 400 |
+| Anything else (e.g. `whisper-1`) | `STT_PROXY_DEFAULT_PROVIDER` if set, else the only configured provider (if there is exactly one), else 400 |
 
 Examples:
 
@@ -261,13 +269,13 @@ curl -X POST .../v1/audio/transcriptions \
     -F model=salute-speech \
     -F file=@speech.wav
 
-# Use the default provider (configured via STT_DEFAULT_PROVIDER or auto-detected)
+# Use the default provider (configured via STT_PROXY_DEFAULT_PROVIDER or auto-detected)
 curl -X POST .../v1/audio/transcriptions \
     -F model=whisper-1 \
     -F file=@speech.wav
 ```
 
-`yandex-*` model values can also be passed directly to the `YANDEX_MODEL` configuration; the SDK's underlying STT v3 endpoint is the same either way.
+`yandex-*` model values can also be passed directly to the `STT_PROXY_YANDEX_MODEL` configuration; the SDK's underlying STT v3 endpoint is the same either way.
 
 ---
 
@@ -362,7 +370,7 @@ task clean
 ### Useful environment overrides for `task dev`
 
 ```bash
-HOST=0.0.0.0 PORT=9000 task dev
+STT_PROXY_HOST=0.0.0.0 STT_PROXY_PORT=9000 task dev
 ```
 
 ### Code style
@@ -378,19 +386,19 @@ HOST=0.0.0.0 PORT=9000 task dev
 
 You started the server without setting any provider credentials. Copy `.env.example` to `.env`, fill in at least one provider's keys, and try again. The process exits with code `2` on purpose — there is no useful behaviour without a backend.
 
-### "Multiple STT providers configured but STT_DEFAULT_PROVIDER is unset"
+### "Multiple STT providers configured but STT_PROXY_DEFAULT_PROVIDER is unset"
 
-You enabled both Yandex and SaluteSpeech, but your request `model` has no prefix and you didn't set `STT_DEFAULT_PROVIDER`. Either:
-- set `STT_DEFAULT_PROVIDER=yandex` (or `salute`) in `.env`, or
+You enabled both Yandex and SaluteSpeech, but your request `model` has no prefix and you didn't set `STT_PROXY_DEFAULT_PROVIDER`. Either:
+- set `STT_PROXY_DEFAULT_PROVIDER=yandex` (or `salute`) in `.env`, or
 - prefix the request `model` with `yandex-` or `salute-`.
 
 ### "Yandex transcription failed: ... StatusCode.UNAUTHENTICATED"
 
-`YANDEX_API_KEY` is wrong or does not have the `ai.speechkit.stt` role in the specified folder. Verify both the key and the folder id at <https://console.yandex.cloud/>.
+`STT_PROXY_YANDEX_API_KEY` is wrong or does not have the `ai.speechkit.stt` role in the specified folder. Verify both the key and the folder id at <https://console.yandex.cloud/>.
 
 ### SaluteSpeech "TokenRequestError" / "401 Unauthorized"
 
-`SBER_SALUTE_SPEECH_API_KEY` is malformed. It must be the base64 of `client_id:client_secret` exactly as shown in SaluteSpeech Studio → Project → Authorization key. You can recreate it:
+`STT_PROXY_SALUTESPEECH_KEY` is malformed. It must be the base64 of `client_id:client_secret` exactly as shown in SaluteSpeech Studio → Project → Authorization key. You can recreate it:
 
 ```bash
 printf 'CLIENT_ID:CLIENT_SECRET' | base64

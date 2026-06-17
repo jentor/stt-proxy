@@ -58,7 +58,7 @@ async def create_transcription(
 
     # 2. Pick a provider. Routing precedence:
     #    a) explicit prefix in `model`
-    #    b) STT_DEFAULT_PROVIDER
+    #    b) STT_PROXY_DEFAULT_PROVIDER
     #    c) sole configured provider (if exactly one)
     routed = detect_routing(model)
     if routed:

@@ -14,6 +14,8 @@ includes:
 vars:
   PYTHON: '{{ default "python" .PYTHON }}'
   UV: '{{ default "uv" .UV }}'
+  # Run uv with .env loaded if present. Falls back to plain uv run otherwise.
+  UV_RUN: scripts/with-dotenv.sh
 
 tasks:
   default:
@@ -45,25 +47,20 @@ tasks:
     silent: false
 
   run:
-    desc: "Run the proxy in production mode. Reads HOST/PORT (and creds) from .env or shell env."
+    desc: "Run the proxy in production mode. Reads STT_PROXY_* env vars from .env or shell."
     cmds:
-      - "{{.UV}} run python -m app.main"
+      - "{{.UV_RUN}} python -m app.main"
 
   test:
-    desc: "Run pytest (adds a default [] suite if no tests exist yet)"
+    desc: "Run pytest (no tests yet, will exit 5)"
     cmds:
-      - "{{.UV}} run pytest -v {{.CLI_ARGS}}"
+      - "{{.UV_RUN}} pytest -v {{.CLI_ARGS}}"
     silent: false
 
   test-quick:
-    desc: "Run a quick import + smoke check without pytest (reads .env automatically via pydantic-settings)"
+    desc: "Quick import + smoke check without pytest (auto-loads .env)"
     cmds:
-      - cmd: |
-          if [ -z "${YANDEX_API_KEY:-}${SBER_SALUTE_SPEECH_API_KEY:-}" ]; then
-            echo 'set at least one provider env var before running test-quick' >&2
-            exit 2
-          fi
-      - "{{.UV}} run python -c 'from app.main import create_app; app = create_app(); print(\"app imports OK, routes:\", [r.path for r in app.routes if hasattr(r, \"path\")][:5])'"
+      - "{{.UV_RUN}} python -c 'from app.main import create_app; app = create_app(); print(\"app imports OK, routes:\", [r.path for r in app.routes if hasattr(r, \"path\")][:5])'"
 
   lint:
     desc: "Run ruff lint"
