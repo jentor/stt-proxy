@@ -345,6 +345,14 @@ def _cmd_config_show(_args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     """Console entry point. Returns a process exit code."""
     parser = _build_parser()
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        # No subcommand: print help instead of erroring on the required
+        # subparsers. `stt-proxy --help`, `stt-proxy -h`, and
+        # `stt-proxy <subcommand>` all keep their previous behaviour.
+        parser.print_help()
+        return 0
     args = parser.parse_args(argv)
 
     if args.command == "start":
