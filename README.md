@@ -51,23 +51,21 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 ## Quick start
 
 ```bash
-# 1. Clone and enter the project
-git clone <repo-url> stt-proxy && cd stt-proxy
+# 1. Install the CLI tool directly from the Git repo (registers
+#    `stt-proxy` on PATH — no clone needed)
+uv tool install git+ssh://git@gitlab.sberautotech.ru:7999/vagayduk/stt-proxy.git
+# To pin a version, append @vX.Y.Z to the URL.
 
-# 2. Install the CLI tool (registers the `stt-proxy` console command on PATH)
-task install-tool
-# or: uv tool install -e .
-
-# 3. Create the config file and fill in at least one provider's keys
+# 2. Create the config file and fill in at least one provider's keys
 stt-proxy config init
 $EDITOR ~/.config/stt-proxy/config.toml
 
-# 4. Start the daemon in the background
+# 3. Start the daemon in the background
 stt-proxy start
 # => stt-proxy started (pid=...)
 # => logs: ... (run `stt-proxy logs` for the exact path)
 
-# 5. Send a test request
+# 4. Send a test request
 curl -sS -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
     -F model=yandex-general \
     -F file=@./hello.wav \
