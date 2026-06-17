@@ -1,8 +1,10 @@
 # https://taskfile.dev
 #
 # Development-only tasks for stt-proxy.
-# Merged into Taskfile.yml automatically by go-task, so `task dev` and friends
-# are available alongside the production tasks.
+# Included from Taskfile.yml under the `dev:` namespace, so they appear in
+# `task --list` as `dev:lint`, `dev:test`, `dev:serve`, etc. — clearly
+# distinct from the end-user tasks (install-tool, install-deps, run) which
+# stay at the top level.
 
 version: "3"
 
@@ -11,8 +13,8 @@ vars:
   UV: '{{ default "uv" .UV }}'
 
 tasks:
-  dev:
-    desc: "Run the proxy with uvicorn auto-reload. Reads STT_PROXY_* env vars from .env or shell."
+  serve:
+    desc: "Run the proxy with uvicorn auto-reload. Reads STT_PROXY_* env vars from .env or shell. For a non-reloading foreground run use `task run`; for a detached background daemon use `stt-proxy start`."
     env:
       UV_ENV_FILE: .env
       STT_PROXY_RELOAD: "1"
@@ -29,6 +31,55 @@ tasks:
     cmds:
       - task: format
       - task: lint
+
+  format-check:
+    desc: "Check formatting without changing files"
+    cmds:
+      - "{{.UV}} run ruff format --check app"
+
+  lint:
+    desc: "Run ruff lint"
+    cmds:
+      - "{{.UV}} run ruff check app {{.CLI_ARGS}}"
+
+  test:
+    desc: "Run pytest (no tests yet, will exit 5)"
+    env:
+      UV_ENV_FILE: .env
+    cmds:
+      - "{{.UV}} run pytest -v {{.CLI_ARGS}}"
+    silent: false
+
+  test-quick:
+    desc: "Quick import + smoke check without pytest (auto-loads .env)"
+    env:
+      UV_ENV_FILE: .env
+    cmds:
+      - "{{.UV}} run python -c 'from app.main import create_app; app = create_app(); print(\"app imports OK, routes:\", [r.path for r in app.routes if hasattr(r, \"path\")][:5])'"
+
+  add:
+    desc: "Add a runtime dependency (use --dev for development deps)"
+    cmds:
+      - "{{.UV}} add {{.CLI_ARGS}}"
+    silent: false
+
+  remove:
+    desc: "Remove a dependency"
+    cmds:
+      - "{{.UV}} remove {{.CLI_ARGS}}"
+    silent: false
+
+  update:
+    desc: "Upgrade lockfile and reinstall"
+    cmds:
+      - "{{.UV}} lock --upgrade"
+      - "{{.UV}} sync"
+
+  clean:
+    desc: "Remove caches and build artifacts"
+    cmds:
+      - "rm -rf .pytest_cache .ruff_cache .venv __pycache__ */__pycache__ */*/__pycache__"
+      - "find . -name '*.pyc' -delete"
 
   doctor:
     desc: "Print versions of key tools (uv, python, ffmpeg)"

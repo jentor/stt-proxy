@@ -1,8 +1,10 @@
 # https://taskfile.dev
 #
-# Main task catalogue for stt-proxy.
-# Dev-only tasks (auto-reload, format, etc.) live in Taskfile.dev.yml and
-# are merged in automatically by go-task.
+# Main task catalogue for stt-proxy — end-user tasks only.
+# Developer-only tasks (lint, format, test, auto-reload server, etc.) live
+# in Taskfile.dev.yml and are brought in under the `dev:` namespace by the
+# include below, so they appear in `task --list` as `dev:lint`, `dev:test`,
+# `dev:serve`, etc. — clearly distinct from the end-user tasks here.
 
 version: "3"
 
@@ -30,9 +32,9 @@ vars:
 #                            `stt-proxy` console command (start/stop/logs).
 #                            The daemon launched by `stt-proxy start`
 #                            ignores .env by design — it only sees env vars
-#                            exported in the calling shell.
-#   * `task install-deps`  — `uv sync` populates .venv for the foreground
-#                            dev tasks (`task dev` / `task run` / `task test`).
+#                            exported in the calling shell (plus the
+#                            optional ~/.config/stt-proxy/config.toml file).
+#   * `task install-deps`  — `uv sync` populates .venv for `task run`.
 #                            Usually unnecessary — `uv run` auto-syncs.
 
 tasks:
@@ -47,62 +49,13 @@ tasks:
       - "{{.UV}} tool install -e ."
 
   install-deps:
-    desc: "Sync project dependencies to .venv (for `task dev`/`task run`/`task test`). Usually unnecessary — `uv run` auto-syncs."
+    desc: "Sync project dependencies to .venv (for `task run`). Usually unnecessary — `uv run` auto-syncs."
     cmds:
       - "{{.UV}} sync"
-
-  update:
-    desc: "Upgrade lockfile and reinstall"
-    cmds:
-      - "{{.UV}} lock --upgrade"
-      - "{{.UV}} sync"
-
-  add:
-    desc: "Add a runtime dependency (use --dev for development deps)"
-    cmds:
-      - "{{.UV}} add {{.CLI_ARGS}}"
-    silent: false
-
-  remove:
-    desc: "Remove a dependency"
-    cmds:
-      - "{{.UV}} remove {{.CLI_ARGS}}"
-    silent: false
 
   run:
-    desc: "Run the proxy in production mode. Reads STT_PROXY_* env vars from .env or shell."
+    desc: "Run the proxy in the foreground (no auto-reload). Reads STT_PROXY_* env vars from .env or shell. For auto-reload use `task dev:serve`; for a detached background daemon use `stt-proxy start` after `task install-tool`."
     env:
       UV_ENV_FILE: .env
     cmds:
       - "{{.UV}} run python -m app.main"
-
-  test:
-    desc: "Run pytest (no tests yet, will exit 5)"
-    env:
-      UV_ENV_FILE: .env
-    cmds:
-      - "{{.UV}} run pytest -v {{.CLI_ARGS}}"
-    silent: false
-
-  test-quick:
-    desc: "Quick import + smoke check without pytest (auto-loads .env)"
-    env:
-      UV_ENV_FILE: .env
-    cmds:
-      - "{{.UV}} run python -c 'from app.main import create_app; app = create_app(); print(\"app imports OK, routes:\", [r.path for r in app.routes if hasattr(r, \"path\")][:5])'"
-
-  lint:
-    desc: "Run ruff lint"
-    cmds:
-      - "{{.UV}} run ruff check app {{.CLI_ARGS}}"
-
-  format-check:
-    desc: "Check formatting without changing files"
-    cmds:
-      - "{{.UV}} run ruff format --check app"
-
-  clean:
-    desc: "Remove caches and build artifacts"
-    cmds:
-      - "rm -rf .pytest_cache .ruff_cache .venv __pycache__ */__pycache__ */*/__pycache__"
-      - "find . -name '*.pyc' -delete"

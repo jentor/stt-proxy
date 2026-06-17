@@ -63,7 +63,7 @@ cp .env.example .env
 $EDITOR .env            # set at least one provider's keys
 
 # 4. Run the dev server with auto-reload
-task dev
+task dev:serve
 # or: uv run uvicorn app.main:app --reload
 
 # 5. Send a test request
@@ -114,7 +114,7 @@ task dev:info
 There are two ways to run stt-proxy:
 
 1. **As a CLI tool / background daemon** (new): `task install-tool` registers a `stt-proxy` command with `start` / `stop` / `logs` subcommands. The daemon runs detached, writes rotating logs to your user log directory, and reads configuration **only from the shell environment** (no `.env` lookup). Best for "always on" / production-style use.
-2. **In the foreground** (existing): `task dev` / `task run` / `uv run uvicorn ...` run the server in your terminal, with full `.env` support and (for `task dev`) auto-reload on file changes. Best for development.
+2. **In the foreground** (existing): `task dev:serve` / `task run` / `uv run uvicorn ...` run the server in your terminal, with full `.env` support and (for `task dev:serve`) auto-reload on file changes. Best for development.
 
 ### Installing as a CLI tool (`uv tool install`)
 
@@ -177,7 +177,7 @@ If the config file exists but is malformed, `stt-proxy start` and
 and the TOML line/column — no more digging through the log file to find
 the typo.
 
-> **Env-var precedence for the daemon**: the daemon reads *only* the process environment (whatever you `export` in the shell before `stt-proxy start`), plus the optional TOML config file above. It deliberately ignores `.env`. If you want to use `.env` values, run `set -a; . ./.env; set +a` before `stt-proxy start`, or stick with `task run` / `task dev` which DO load `.env`.
+> **Env-var precedence for the daemon**: the daemon reads *only* the process environment (whatever you `export` in the shell before `stt-proxy start`), plus the optional TOML config file above. It deliberately ignores `.env`. If you want to use `.env` values, run `set -a; . ./.env; set +a` before `stt-proxy start`, or stick with `task run` / `task dev:serve` which DO load `.env`.
 
 ### Running in the foreground (development)
 
@@ -201,7 +201,7 @@ task run
 
 ```bash
 # Development (auto-reload on file change)
-task dev
+task dev:serve
 
 # Production-style single worker
 task run
@@ -408,8 +408,8 @@ stt-proxy/
 ├── scripts/
 │   └── info.py            # `task dev:info` helper
 ├── pyproject.toml         # uv project + dependencies
-├── Taskfile.yml           # production tasks
-├── Taskfile.dev.yml       # development tasks (auto-merged)
+├── Taskfile.yml           # end-user tasks (install-tool, install-deps, run)
+├── Taskfile.dev.yml       # developer tasks (included under the `dev:` namespace)
 ├── .env.example           # documented sample env
 ├── .gitignore
 └── README.md
@@ -420,7 +420,7 @@ stt-proxy/
 ## Development workflow
 
 ```bash
-# Populate .venv for the foreground dev tasks below (usually unnecessary —
+# Populate .venv for `task run` (usually unnecessary —
 # `uv run` auto-syncs; this is just for offline / reproducibility).
 task install-deps
 
@@ -428,10 +428,10 @@ task install-deps
 task install-tool
 
 # Run with auto-reload on code changes
-task dev
+task dev:serve
 
 # Lint
-task lint
+task dev:lint
 
 # Auto-format
 task dev:format
@@ -445,21 +445,21 @@ task dev:doctor
 task dev:info
 
 # Add a runtime dependency
-task add httpx
+task dev:add httpx
 # Add a dev dependency
-task add --dev pytest-asyncio
+task dev:add --dev pytest-asyncio
 
 # Run tests (none yet, but the wiring is in place)
-task test
+task dev:test
 
 # Wipe caches
-task clean
+task dev:clean
 ```
 
-### Useful environment overrides for `task dev`
+### Useful environment overrides for `task dev:serve`
 
 ```bash
-STT_PROXY_HOST=0.0.0.0 STT_PROXY_PORT=9000 task dev
+STT_PROXY_HOST=0.0.0.0 STT_PROXY_PORT=9000 task dev:serve
 ```
 
 ### Code style
