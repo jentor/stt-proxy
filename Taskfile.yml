@@ -61,9 +61,14 @@ tasks:
     silent: false
 
   test-quick:
-    desc: "Run a quick import + smoke check without pytest"
+    desc: "Run a quick import + smoke check without pytest (needs at least one provider's creds)"
     cmds:
-      - "{{.UV}} run python -c 'from app.main import create_app; print(\"app imports OK\")'"
+      - cmd: |
+          if [ -z "${YANDEX_API_KEY:-}${SBER_SALUTE_SPEECH_API_KEY:-}${SBER_SPEECH_API_KEY:-}" ]; then
+            echo 'set at least one provider env var before running test-quick' >&2
+            exit 2
+          fi
+      - "{{.UV}} run python -c 'from app.main import create_app; app = create_app(); print(\"app imports OK, routes:\", [r.path for r in app.routes if hasattr(r, \"path\")][:5])'"
 
   lint:
     desc: "Run ruff lint"
