@@ -14,11 +14,22 @@ All environment variables are namespaced under ``STT_PROXY_`` (configured via
 The ``.env`` file in the working directory is loaded automatically by
 pydantic-settings; ``uv run --env-file .env`` in the Taskfile is a no-op
 duplication that makes ``.env`` visible to ``env | grep`` for debugging.
+
+The detached daemon launched by ``stt-proxy start`` deliberately disables
+``.env`` loading so that the background process only sees variables exported
+in the calling shell — this matches user expectations for a system service
+and avoids surprises when ``.env`` is edited later. This is implemented via
+the ``STT_PROXY_DAEMON`` environment variable (set by the CLI when spawning
+the daemon) which makes :func:`load_settings` skip ``.env`` even on the
+implicit call made by the module-level ``app = create_app()`` during
+uvicorn's string import. See :func:`load_settings` for the full resolution
+rules.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from typing import Literal
 
@@ -150,9 +161,40 @@ class Settings(BaseSettings):
         return default
 
 
-def load_settings() -> Settings:
-    """Build Settings and exit with a clear error if nothing is configured."""
-    settings = Settings()
+# Sentinel used to distinguish "caller passed nothing" from "caller passed None".
+# Without this, ``load_settings(env_file=None)`` (explicit "no .env") would be
+# indistinguishable from ``load_settings()`` (default) once we make the
+# default context-sensitive (see the ``STT_PROXY_DAEMON`` flag below).
+_DEFAULT_ENV_FILE: object = object()
+
+
+def load_settings(
+    *, env_file: str | os.PathLike[str] | None | object = _DEFAULT_ENV_FILE
+) -> Settings:
+    """Build Settings and exit with a clear error if nothing is configured.
+
+    ``env_file`` is forwarded to pydantic-settings as ``_env_file`` (note the
+    leading underscore — pydantic-settings reserves ``env_file`` for the model
+    config dict and exposes the per-call override through ``_env_file``).
+
+    Resolution rules:
+
+    * ``load_settings(env_file=".env")`` (or any explicit path) — that path
+      only.
+    * ``load_settings(env_file=None)`` — never reads ``.env`` (used by the
+      detached daemon launched via ``stt-proxy start``).
+    * ``load_settings()`` (no argument) — reads ``.env`` *unless* the
+      ``STT_PROXY_DAEMON`` environment variable is set, in which case ``.env``
+      is skipped. This matters because :func:`uvicorn.run` is called with the
+      string import ``"app.main:app"``, which re-executes the module-level
+      ``app = create_app()`` → ``load_settings()`` inside the worker; setting
+      ``STT_PROXY_DAEMON=1`` in the daemon's environment (done by
+      :func:`app.cli._cmd_start`) makes that implicit call honor the
+      "shell-env-only" contract.
+    """
+    if env_file is _DEFAULT_ENV_FILE:
+        env_file = None if os.environ.get("STT_PROXY_DAEMON") else ".env"
+    settings = Settings(_env_file=env_file)  # type: ignore[arg-type]
     if not settings.enabled_providers:
         msg = (
             "No STT provider configured.\n"

@@ -16,12 +16,14 @@ dependencies = [
     "python-multipart>=0.0.20",
     "pydantic-settings>=2.7.0",
     "httpx>=0.28.0",
+    "platformdirs>=4.0",
+    "audioop-lts>=0.2.2; python_version >= '3.13'",
     "salute-speech>=2.0.0",
     "yandex-ai-studio-sdk>=0.20.0",
 ]
 
 [project.scripts]
-stt-proxy = "app.main:run"
+stt-proxy = "app.cli:main"
 
 [build-system]
 requires = ["hatchling"]

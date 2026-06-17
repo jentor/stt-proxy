@@ -24,6 +24,16 @@ vars:
 #
 # If .env doesn't exist, uv errors with "No environment file found at:
 # `.env`" before any Python code runs. Copy .env.example to .env first.
+#
+# Two install paths exist:
+#   * `task install-tool`  — `uv tool install -e .` registers a global
+#                            `stt-proxy` console command (start/stop/logs).
+#                            The daemon launched by `stt-proxy start`
+#                            ignores .env by design — it only sees env vars
+#                            exported in the calling shell.
+#   * `task install-deps`  — `uv sync` populates .venv for the foreground
+#                            dev tasks (`task dev` / `task run` / `task test`).
+#                            Usually unnecessary — `uv run` auto-syncs.
 
 tasks:
   default:
@@ -31,8 +41,13 @@ tasks:
     cmds:
       - task --list
 
-  install:
-    desc: "Resolve and sync project dependencies via uv"
+  install-tool:
+    desc: "Install stt-proxy as a local uv tool (creates `stt-proxy` console command)"
+    cmds:
+      - "{{.UV}} tool install -e ."
+
+  install-deps:
+    desc: "Sync project dependencies to .venv (for `task dev`/`task run`/`task test`). Usually unnecessary — `uv run` auto-syncs."
     cmds:
       - "{{.UV}} sync"
 

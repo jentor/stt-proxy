@@ -55,7 +55,7 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 git clone <repo-url> stt-proxy && cd stt-proxy
 
 # 2. Install dependencies (uv manages .venv automatically)
-task install
+task install-deps
 # or: uv sync
 
 # 3. Configure credentials
@@ -111,6 +111,46 @@ task dev:info
 
 ## Running the server
 
+There are two ways to run stt-proxy:
+
+1. **As a CLI tool / background daemon** (new): `task install-tool` registers a `stt-proxy` command with `start` / `stop` / `logs` subcommands. The daemon runs detached, writes rotating logs to your user log directory, and reads configuration **only from the shell environment** (no `.env` lookup). Best for "always on" / production-style use.
+2. **In the foreground** (existing): `task dev` / `task run` / `uv run uvicorn ...` run the server in your terminal, with full `.env` support and (for `task dev`) auto-reload on file changes. Best for development.
+
+### Installing as a CLI tool (`uv tool install`)
+
+```bash
+task install-tool      # runs: uv tool install -e .
+```
+
+This installs the project as a uv-managed tool and puts `stt-proxy` on your `PATH` (typically under `~/.local/bin`). After install, the three subcommands are available globally, independent of the project's `.venv`:
+
+```bash
+# Launch as a detached background daemon. Env vars come from the shell —
+# export STT_PROXY_* before running; .env is NOT consulted by the daemon.
+export STT_PROXY_YANDEX_API_KEY=...
+export STT_PROXY_YANDEX_FOLDER_ID=...
+stt-proxy start
+# => stt-proxy started (pid=12345)
+#    logs: /Users/<you>/Library/Logs/stt-proxy/stt-proxy.log
+
+stt-proxy logs                # print log/PID paths (no tailing)
+stt-proxy logs -f             # tail -f the log file
+stt-proxy stop                # SIGTERM, then SIGKILL after 10s
+```
+
+Log and PID file locations (managed by [`platformdirs`](https://pypi.org/project/platformdirs/)):
+
+| Platform | log file                                    | PID file                                          |
+|---|---|---|
+| **macOS** | `~/Library/Logs/stt-proxy/stt-proxy.log`  | `$TMPDIR/stt-proxy/stt-proxy.pid` (under `/var/folders/...`) |
+| **Linux** | `~/.cache/stt-proxy/stt-proxy.log`        | `/run/user/<uid>/stt-proxy/stt-proxy.pid`          |
+
+Logs rotate at 10 MiB with 5 backups.
+
+> **Env-var precedence for the daemon**: the daemon reads *only* the process environment (whatever you `export` in the shell before `stt-proxy start`). It deliberately ignores `.env`. If you want to use `.env` values, run `set -a; . ./.env; set +a` before `stt-proxy start`, or stick with `task run` / `task dev` which DO load `.env`.
+
+### Running in the foreground (development)
+
 `STT_PROXY_*` settings are resolved in this order (highest priority first):
 
 1. shell environment variables (e.g. `STT_PROXY_PORT=12000 task run`)
@@ -140,10 +180,11 @@ task run
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-The console script `stt-proxy` is also installed in the venv:
+The `stt-proxy` console script (installed by `task install-tool` as a uv tool) is the CLI documented above (`start` / `stop` / `logs`). For ad-hoc foreground runs from the project venv without installing the tool:
 
 ```bash
-uv run stt-proxy
+uv run uvicorn app.main:app            # foreground, no reload
+uv run python -m app.main              # same, through app.main.run()
 ```
 
 ### Health / inspection endpoints
@@ -349,8 +390,12 @@ stt-proxy/
 ## Development workflow
 
 ```bash
-# Install everything
-task install
+# Populate .venv for the foreground dev tasks below (usually unnecessary —
+# `uv run` auto-syncs; this is just for offline / reproducibility).
+task install-deps
+
+# OR: install the global CLI tool (creates the `stt-proxy` command on PATH)
+task install-tool
 
 # Run with auto-reload on code changes
 task dev

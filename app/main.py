@@ -10,9 +10,12 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
+
+from uvicorn.config import LOGGING_CONFIG
 
 from .config import Settings, load_settings
 from .providers import Provider, SaluteProvider, YandexProvider
@@ -83,24 +86,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 app = create_app()
 
 
-def run() -> None:
-    """Entry point used by ``stt-proxy`` console script and Taskfile.
+def run_server(
+    settings: Settings,
+    *,
+    reload: bool = False,
+    log_config: dict[str, Any] | None = LOGGING_CONFIG,
+) -> None:
+    """Launch uvicorn against the module-level ``app`` object.
 
-    Honours the ``STT_PROXY_RELOAD`` env var (set to ``1``/``true`` by the
-    dev task) to enable uvicorn's auto-reload. All other configuration
-    (host, port, workers, log level) comes from ``.env`` / shell env via
-    :func:`load_settings`.
+    This is the shared "start serving HTTP" routine used by both the
+    foreground entry point (:func:`run`, via ``task run`` / ``task dev``) and
+    the detached daemon launched by ``stt-proxy start`` (see
+    :mod:`app.daemon`). ``reload`` is always ``False`` in the daemon — live
+    reload is a development convenience and meaningless for a production
+    background process.
+
+    ``log_config`` is forwarded to uvicorn. The default
+    (:data:`uvicorn.config.LOGGING_CONFIG`) preserves the pretty coloured
+    stderr output users expect from ``task run`` / ``task dev``. The daemon
+    passes ``None`` so uvicorn leaves logging alone — letting the daemon's
+    own :class:`~logging.handlers.RotatingFileHandler` capture uvicorn's
+    startup banner and access logs instead of losing them to ``/dev/null``.
     """
-    settings = load_settings()
-    reload_enabled = os.getenv("STT_PROXY_RELOAD", "").lower() in {"1", "true", "yes"}
     uvicorn.run(
         "app.main:app",
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
         workers=settings.workers,
-        reload=reload_enabled,
+        reload=reload,
+        log_config=log_config,
     )
+
+
+def run() -> None:
+    """Entry point used by ``task run`` / ``task dev``.
+
+    Honours the ``STT_PROXY_RELOAD`` env var (set to ``1``/``true`` by the
+    dev task) to enable uvicorn's auto-reload. All other configuration
+    (host, port, workers, log level) comes from ``.env`` / shell env via
+    :func:`load_settings`.
+
+    The detached ``stt-proxy`` CLI (``stt-proxy start``) does NOT go through
+    this function — see :mod:`app.cli` and :mod:`app.daemon`.
+    """
+    settings = load_settings()
+    reload_enabled = os.getenv("STT_PROXY_RELOAD", "").lower() in {"1", "true", "yes"}
+    run_server(settings, reload=reload_enabled)
 
 
 if __name__ == "__main__":
