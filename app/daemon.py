@@ -29,7 +29,6 @@ from pathlib import Path
 import platformdirs
 
 from .config import load_settings
-from .main import run_server
 
 _LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s :: %(message)s"
 _LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S"
@@ -181,15 +180,32 @@ def main() -> None:
     # in the log file rather than vanishing into /dev/null (the parent CLI
     # redirected our stdio to DEVNULL).
     try:
+        # Importing app.main triggers its module-level ``app = create_app()``,
+        # which itself calls ``load_settings()`` (honouring STT_PROXY_DAEMON).
+        # We import it lazily inside this try block so that a malformed TOML
+        # config file — which makes ``load_settings()`` raise during source
+        # construction — is caught here and lands in the log file instead of
+        # dying silently during module import.
+        from .main import run_server
+
         settings = load_settings(env_file=None)
-    except SystemExit:
-        # load_settings() raises SystemExit(2) on misconfiguration with a
-        # message already printed to stderr — but stderr is DEVNULL here.
-        # Re-initialise logging with the default level and record the cause.
+    except BaseException as exc:
+        # load_settings() may raise SystemExit(2) on a "no provider
+        # configured" refusal (with a message already printed to stderr),
+        # OR any other exception — most notably a TOML parse error from
+        # pydantic-settings when the config file at
+        # ~/.config/stt-proxy/config.toml is malformed. Either way stderr
+        # is DEVNULL for the daemon, so re-initialise logging with the
+        # default level and record the cause before re-raising.
         _configure_logging("INFO", paths)
-        logging.getLogger(__name__).error(
-            "load_settings() refused to start (no provider configured); exiting"
-        )
+        if isinstance(exc, SystemExit):
+            logging.getLogger(__name__).error(
+                "load_settings() refused to start (no provider configured); exiting"
+            )
+        else:
+            logging.getLogger(__name__).exception(
+                "load_settings() failed (malformed config file or other error); exiting"
+            )
         raise
 
     _configure_logging(settings.log_level, paths)

@@ -122,7 +122,7 @@ There are two ways to run stt-proxy:
 task install-tool      # runs: uv tool install -e .
 ```
 
-This installs the project as a uv-managed tool and puts `stt-proxy` on your `PATH` (typically under `~/.local/bin`). After install, the three subcommands are available globally, independent of the project's `.venv`:
+This installs the project as a uv-managed tool and puts `stt-proxy` on your `PATH` (typically under `~/.local/bin`). After install, the four subcommands are available globally, independent of the project's `.venv`:
 
 ```bash
 # Launch as a detached background daemon. Env vars come from the shell —
@@ -136,6 +136,9 @@ stt-proxy start
 stt-proxy logs                # print log/PID paths (no tailing)
 stt-proxy logs -f             # tail -f the log file
 stt-proxy stop                # SIGTERM, then SIGKILL after 10s
+
+stt-proxy config               # show effective config (secrets masked)
+stt-proxy config init          # create ~/.config/stt-proxy/config.toml
 ```
 
 Log and PID file locations (managed by [`platformdirs`](https://pypi.org/project/platformdirs/)):
@@ -147,7 +150,25 @@ Log and PID file locations (managed by [`platformdirs`](https://pypi.org/project
 
 Logs rotate at 10 MiB with 5 backups.
 
-> **Env-var precedence for the daemon**: the daemon reads *only* the process environment (whatever you `export` in the shell before `stt-proxy start`). It deliberately ignores `.env`. If you want to use `.env` values, run `set -a; . ./.env; set +a` before `stt-proxy start`, or stick with `task run` / `task dev` which DO load `.env`.
+### Persisting configuration (optional)
+
+`stt-proxy config init` creates `~/.config/stt-proxy/config.toml` with a
+documented template and sets permissions to `0o600`:
+
+```bash
+stt-proxy config init                # create the file (refuses if it exists)
+stt-proxy config init --force        # overwrite
+$EDITOR ~/.config/stt-proxy/config.toml   # uncomment and fill in the keys you need
+stt-proxy stop && stt-proxy start         # restart the daemon to pick up changes
+```
+
+`stt-proxy config` (no subcommand) prints the effective configuration the
+daemon would use, with secrets masked (`***<last 4>`). In daemon mode the
+file is read as a TOML source alongside shell env. Precedence (highest
+first): shell env → config.toml → defaults. The file is optional — if it
+doesn't exist, the daemon falls back to shell env only.
+
+> **Env-var precedence for the daemon**: the daemon reads *only* the process environment (whatever you `export` in the shell before `stt-proxy start`), plus the optional TOML config file above. It deliberately ignores `.env`. If you want to use `.env` values, run `set -a; . ./.env; set +a` before `stt-proxy start`, or stick with `task run` / `task dev` which DO load `.env`.
 
 ### Running in the foreground (development)
 

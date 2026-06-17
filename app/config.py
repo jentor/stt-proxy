@@ -1,7 +1,8 @@
-"""Application configuration loaded from environment variables.
+"""Application configuration loaded from environment variables / config file.
 
 Only providers whose required credentials are present are enabled. When no
-provider has credentials, the application refuses to start.
+provider has credentials, the application refuses to start (unless called
+with ``validate=False``).
 
 All environment variables are namespaced under ``STT_PROXY_`` (configured via
 ``Settings.model_config.env_prefix``):
@@ -11,19 +12,28 @@ All environment variables are namespaced under ``STT_PROXY_`` (configured via
   * ``STT_PROXY_SALUTESPEECH_KEY``
   * ``STT_PROXY_DEFAULT_PROVIDER``
 
-The ``.env`` file in the working directory is loaded automatically by
-pydantic-settings; ``uv run --env-file .env`` in the Taskfile is a no-op
-duplication that makes ``.env`` visible to ``env | grep`` for debugging.
+Two non-env sources are also supported, depending on which "view" the caller
+asks for (see :func:`load_settings`):
+
+  * The ``.env`` file in the working directory — used by the foreground /
+    development entry points (``task run`` / ``task dev`` / bare
+    ``python -m app.main``). ``uv run --env-file .env`` in the Taskfile is a
+    no-op duplication that makes ``.env`` visible to ``env | grep`` for
+    debugging.
+  * The TOML config file at :func:`_config_file_path` (typically
+    ``~/.config/stt-proxy/config.toml``) — used by the detached daemon
+    launched by ``stt-proxy start``. This matches user expectations for a
+    system service and keeps secrets out of the shell history / process
+    table.
 
 The detached daemon launched by ``stt-proxy start`` deliberately disables
 ``.env`` loading so that the background process only sees variables exported
-in the calling shell — this matches user expectations for a system service
-and avoids surprises when ``.env`` is edited later. This is implemented via
-the ``STT_PROXY_DAEMON`` environment variable (set by the CLI when spawning
-the daemon) which makes :func:`load_settings` skip ``.env`` even on the
-implicit call made by the module-level ``app = create_app()`` during
-uvicorn's string import. See :func:`load_settings` for the full resolution
-rules.
+in the calling shell (plus the optional TOML config file). This is
+implemented via the ``STT_PROXY_DAEMON`` environment variable (set by the
+CLI when spawning the daemon) which makes :func:`load_settings` skip
+``.env`` even on the implicit call made by the module-level
+``app = create_app()`` during uvicorn's string import. See
+:func:`load_settings` for the full resolution rules.
 """
 
 from __future__ import annotations
@@ -31,10 +41,16 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Literal
+from pathlib import Path
+from typing import ClassVar, Literal
 
 from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -53,6 +69,45 @@ class Settings(BaseSettings):
         extra="ignore",
         env_prefix="STT_PROXY_",
     )
+
+    # Transient override used to thread the TOML config file path from
+    # load_settings() into settings_customise_sources(). Set just before
+    # instantiation and reset to None in a finally block.
+    #
+    # This ClassVar exists because pydantic-settings 2.14.x does NOT expose
+    # ``_toml_file`` as a constructor kwarg (unlike ``_env_file``) — the only
+    # way to pass a per-call TOML path is to customise the sources.
+    _toml_file_override: ClassVar[str | Path | None] = None
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Add TomlConfigSettingsSource when load_settings() requests it.
+
+        Source priority is the order of the returned tuple (earlier = higher
+        priority): init kwargs > shell env > .env > TOML > secrets dir.
+        In the daemon view ``_env_file=None`` so the .env source is a no-op,
+        effectively giving: shell env > config.toml > defaults.
+        """
+        sources: list[PydanticBaseSettingsSource] = [
+            init_settings,
+            env_settings,
+            dotenv_settings,
+        ]
+        if cls._toml_file_override is not None:
+            sources.append(
+                TomlConfigSettingsSource(
+                    settings_cls, toml_file=cls._toml_file_override
+                )
+            )
+        sources.append(file_secret_settings)
+        return tuple(sources)
 
     # ---- HTTP server -------------------------------------------------------
     host: str = Field(default="0.0.0.0", description="Bind address for the HTTP server")
@@ -168,34 +223,87 @@ class Settings(BaseSettings):
 _DEFAULT_ENV_FILE: object = object()
 
 
-def load_settings(
-    *, env_file: str | os.PathLike[str] | None | object = _DEFAULT_ENV_FILE
-) -> Settings:
-    """Build Settings and exit with a clear error if nothing is configured.
+def _config_file_path() -> Path:
+    """Return the location of the optional TOML config file.
 
-    ``env_file`` is forwarded to pydantic-settings as ``_env_file`` (note the
-    leading underscore — pydantic-settings reserves ``env_file`` for the model
-    config dict and exposes the per-call override through ``_env_file``).
+    Honours ``XDG_CONFIG_HOME``; defaults to ``~/.config`` on every platform
+    (macOS included — we deliberately do NOT use ``platformdirs`` here, which
+    would point at ``~/Library/Application Support`` on Darwin).
+    """
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")).expanduser()
+    return base / "stt-proxy" / "config.toml"
+
+
+def load_settings(
+    *,
+    env_file: str | os.PathLike[str] | None | object = _DEFAULT_ENV_FILE,
+    daemon: bool | None = None,
+    validate: bool = True,
+) -> Settings:
+    """Build Settings, optionally exiting with a clear error if nothing is configured.
+
+    Parameters
+    ----------
+    env_file:
+        Forwarded to pydantic-settings as ``_env_file`` (note the leading
+        underscore — pydantic-settings reserves ``env_file`` for the model
+        config dict and exposes the per-call override through ``_env_file``).
+        Passing the ``_DEFAULT_ENV_FILE`` sentinel (the default) makes the
+        value context-sensitive (see "Resolution rules" below).
+    daemon:
+        Selects which "view" of the configuration to load.
+
+        * ``None`` (default) — auto-detect from the ``STT_PROXY_DAEMON``
+          environment variable. This preserves today's implicit behaviour
+          for all existing call sites (``app.main.create_app()``,
+          ``app.main.run()``, ``app.daemon.main()``).
+        * ``True`` — force the daemon view: skip ``.env``, optionally load
+          the TOML config file at :func:`_config_file_path`.
+        * ``False`` — force the foreground view: load ``.env`` (or whatever
+          ``env_file`` was passed), ignore the TOML config file.
+    validate:
+        * ``True`` (default) — exit with ``SystemExit(2)`` and a clear
+          message when no provider is configured.
+        * ``False`` — skip that check; return whatever Settings (possibly
+          with zero providers enabled) pydantic-settings produced. Used by
+          ``stt-proxy config`` so it can render a partial view when nothing
+          is configured yet.
 
     Resolution rules:
 
-    * ``load_settings(env_file=".env")`` (or any explicit path) — that path
-      only.
-    * ``load_settings(env_file=None)`` — never reads ``.env`` (used by the
-      detached daemon launched via ``stt-proxy start``).
-    * ``load_settings()`` (no argument) — reads ``.env`` *unless* the
-      ``STT_PROXY_DAEMON`` environment variable is set, in which case ``.env``
-      is skipped. This matters because :func:`uvicorn.run` is called with the
-      string import ``"app.main:app"``, which re-executes the module-level
-      ``app = create_app()`` → ``load_settings()`` inside the worker; setting
-      ``STT_PROXY_DAEMON=1`` in the daemon's environment (done by
-      :func:`app.cli._cmd_start`) makes that implicit call honor the
-      "shell-env-only" contract.
+    * ``daemon`` resolves to ``os.environ.get("STT_PROXY_DAEMON") is not
+      None`` when called as ``daemon=None``.
+    * ``env_file`` (when still the ``_DEFAULT_ENV_FILE`` sentinel) resolves
+      to ``None`` in the daemon view and ``".env"`` in the foreground view.
+      An explicitly-passed value (including ``None``) is used as-is — this
+      preserves ``app.daemon.main()``'s explicit ``env_file=None``.
+    * TOML config file: only consulted in the daemon view, and only when
+      the file actually exists. Threaded into :class:`Settings` via the
+      ``_toml_file_override`` ClassVar + ``settings_customise_sources``
+      override (pydantic-settings 2.14.x doesn't expose ``_toml_file`` as
+      a constructor kwarg).
+
+    File-loading precedence in the daemon view (highest first):
+
+    1. shell environment variables (``STT_PROXY_*``)
+    2. ``~/.config/stt-proxy/config.toml`` (if present)
+    3. built-in defaults
+
+    In the foreground view, the precedence is shell env → ``.env`` →
+    defaults (the TOML file is never read).
     """
+    if daemon is None:
+        daemon = os.environ.get("STT_PROXY_DAEMON") is not None
     if env_file is _DEFAULT_ENV_FILE:
-        env_file = None if os.environ.get("STT_PROXY_DAEMON") else ".env"
-    settings = Settings(_env_file=env_file)  # type: ignore[arg-type]
-    if not settings.enabled_providers:
+        env_file = None if daemon else ".env"
+    config_path = _config_file_path()
+    toml_path = str(config_path) if daemon and config_path.is_file() else None
+    Settings._toml_file_override = toml_path
+    try:
+        settings = Settings(_env_file=env_file)  # type: ignore[arg-type]
+    finally:
+        Settings._toml_file_override = None
+    if validate and not settings.enabled_providers:
         msg = (
             "No STT provider configured.\n"
             "Set STT_PROXY_YANDEX_API_KEY + STT_PROXY_YANDEX_FOLDER_ID for Yandex SpeechKit, and/or\n"
