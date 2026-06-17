@@ -54,19 +54,26 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 # 1. Clone and enter the project
 git clone <repo-url> stt-proxy && cd stt-proxy
 
-# 2. Configure credentials
-cp .env.example .env
-$EDITOR .env            # set at least one provider's keys
+# 2. Install the CLI tool (registers the `stt-proxy` console command on PATH)
+task install-tool
+# or: uv tool install -e .
 
-# 3. Run the dev server with auto-reload
-task dev:serve
-# or: uv run uvicorn app.main:app --reload
+# 3. Create the config file and fill in at least one provider's keys
+stt-proxy config init
+$EDITOR ~/.config/stt-proxy/config.toml
 
-# 4. Send a test request
+# 4. Start the daemon in the background
+stt-proxy start
+# => stt-proxy started (pid=...)
+# => logs: ... (run `stt-proxy logs` for the exact path)
+
+# 5. Send a test request
 curl -sS -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
     -F model=yandex-general \
     -F file=@./hello.wav \
     -F response_format=json
+
+# Other useful commands: `stt-proxy stop`, `stt-proxy logs [-f]`, `stt-proxy config`
 ```
 
 If neither provider is configured, the process exits at startup with exit code `2` and a clear error message on stderr.
