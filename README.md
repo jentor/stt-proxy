@@ -79,7 +79,7 @@ All configuration is read from environment variables (and optionally a `.env` fi
 
 | Variable | Default | Description |
 |---|---|---|
-| `STT_PROXY_HOST` | `0.0.0.0` | HTTP bind address |
+| `STT_PROXY_HOST` | `127.0.0.1` | HTTP bind address (default: localhost only; set to `0.0.0.0` to accept from other hosts) |
 | `STT_PROXY_PORT` | `8000` | HTTP bind port |
 | `STT_PROXY_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `STT_PROXY_WORKERS` | `1` | uvicorn workers (keep at 1 — provider SDKs may not be fork-safe) |
@@ -203,7 +203,7 @@ task dev:serve
 task run
 
 # Direct uvicorn (bypasses our run() entry point)
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 The `stt-proxy` console script (installed by `task install-tool` as a uv tool) is the CLI documented above (`start` / `stop` / `logs`). For ad-hoc foreground runs from the project venv without installing the tool:
@@ -451,7 +451,7 @@ task dev:clean
 ### Useful environment overrides for `task dev:serve`
 
 ```bash
-STT_PROXY_HOST=0.0.0.0 STT_PROXY_PORT=9000 task dev:serve
+STT_PROXY_HOST=127.0.0.1 STT_PROXY_PORT=9000 task dev:serve
 ```
 
 ### Code style

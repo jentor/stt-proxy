@@ -66,7 +66,7 @@ _CONFIG_TEMPLATE = """\
 # default_provider = "yandex"             # or "salute"
 
 # ----- HTTP server -----
-# host = "0.0.0.0"
+# host = "127.0.0.1"
 # port = 8000
 # log_level = "INFO"                      # DEBUG / INFO / WARNING / ERROR
 # workers = 1
@@ -102,7 +102,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_config = sub.add_parser(
         "config",
-        help="View or initialise the config file (~/.config/stt-proxy/config.toml).",
+        help=(
+            "Show effective config (default); pass 'init' to create the "
+            "config file at ~/.config/stt-proxy/config.toml."
+        ),
     )
     # `config_command` is intentionally NOT required — running `stt-proxy config`
     # with no subcommand falls through to the "show effective config" path.

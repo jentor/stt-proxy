@@ -111,7 +111,13 @@ class Settings(BaseSettings):
         return tuple(sources)
 
     # ---- HTTP server -------------------------------------------------------
-    host: str = Field(default="0.0.0.0", description="Bind address for the HTTP server")
+    host: str = Field(
+        default="127.0.0.1",
+        description=(
+            "Bind address for the HTTP server. Default 127.0.0.1 (localhost only); "
+            "set to 0.0.0.0 to accept connections from other hosts on the network."
+        ),
+    )
     port: int = Field(
         default=8000, ge=1, le=65535, description="Bind port for the HTTP server"
     )
