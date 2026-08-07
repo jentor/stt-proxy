@@ -9,6 +9,7 @@ from .base import (
     TranscriptionResult,
     TranscriptionSegment,
     detect_routing,
+    salute_model_tag,
     yandex_model_tag,
 )
 from .salute import SaluteProvider
@@ -23,6 +24,7 @@ __all__ = [
     "TranscriptionResult",
     "TranscriptionSegment",
     "detect_routing",
+    "salute_model_tag",
     "yandex_model_tag",
     "SaluteProvider",
     "YandexProvider",

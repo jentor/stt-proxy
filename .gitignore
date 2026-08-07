@@ -37,3 +37,5 @@ Thumbs.db
 
 # Local probe / tmp files used during manual testing
 /tmp/
+# CocoIndex Code (ccc)
+/.cocoindex_code/

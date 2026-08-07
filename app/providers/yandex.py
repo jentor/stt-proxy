@@ -102,10 +102,11 @@ class YandexProvider(Provider):
         self._sdk = AIStudio(folder_id=folder_id, auth=api_key)
         self._default_model = default_model
 
-    def list_models(self) -> list[ModelInfo]:
+    @classmethod
+    def list_models(cls) -> list[ModelInfo]:
         """Advertise every Yandex model tag we know how to route to."""
         return [
-            ModelInfo(id=f"yandex-{tag}", owned_by="yandex") for tag in self._MODEL_TAGS
+            ModelInfo(id=f"yandex/{tag}", owned_by="yandex") for tag in cls._MODEL_TAGS
         ]
 
     async def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
@@ -113,6 +114,9 @@ class YandexProvider(Provider):
         # for the AudioFormat enum value, so we import lazily.
         from yandex_ai_studio_sdk._speechkit.enums import (
             AudioFormat as YandexAudioFormat,
+        )
+        from yandex_ai_studio_sdk._speechkit.speech_to_text.structures import (
+            TextNormalization,
         )
 
         fmt_value, _ = _pick_yandex_audio_format(request.audio)
@@ -125,11 +129,18 @@ class YandexProvider(Provider):
             audio_format=sdk_audio_format,
             model=model_tag,
             language_codes=language,
+            # Normalization alone formats numbers/dates. Literature mode adds
+            # sentence capitalization and punctuation to the refined result.
+            text_normalization=TextNormalization(literature_text=True),
         )
 
         def _run() -> TranscriptionResult:
             try:
-                result = stt.run(request.audio.data)
+                if request.deferred:
+                    operation = stt.run_deferred(request.audio.data)
+                    result = operation.wait(poll_interval=1.0)
+                else:
+                    result = stt.run(request.audio.data)
             except Exception as exc:
                 logger.exception("Yandex transcription failed")
                 raise ProviderError(f"Yandex transcription failed: {exc}") from exc

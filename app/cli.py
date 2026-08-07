@@ -1,6 +1,6 @@
-"""``stt-proxy`` console command — argparse front-end for the daemon.
+"""``stt-proxy`` console command — daemon management and direct transcription.
 
-Four subcommands, all routed through :func:`main`:
+Six subcommands, all routed through :func:`main`:
 
 * ``stt-proxy start`` — spawn a detached background daemon (see
   :mod:`app.daemon`) that inherits the current shell's environment.
@@ -11,6 +11,8 @@ Four subcommands, all routed through :func:`main`:
 * ``stt-proxy config`` — print the effective configuration the daemon would
   see, with secrets masked. ``stt-proxy config init [--force]`` creates
   ``~/.config/stt-proxy/config.toml`` from a documented template.
+* ``stt-proxy transcribe`` — transcribe a file directly with no daemon.
+* ``stt-proxy models`` — print model ids accepted by ``--model``.
 
 If ``~/.config/stt-proxy/config.toml`` exists but is malformed, both
 ``start`` and ``config`` refuse to run with a clear error to stderr before
@@ -24,9 +26,14 @@ needs (plus ``platformdirs``, which is shared with :mod:`app.daemon`).
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
+import mimetypes
 import os
+from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Sequence
 
@@ -77,7 +84,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stt-proxy",
         description=(
-            "Manage the stt-proxy background daemon. "
+            "Transcribe audio or manage the stt-proxy background daemon. "
+            "Run `stt-proxy transcribe --model PROVIDER/MODEL FILE` for a direct request; "
+            "`stt-proxy models` lists known model ids. "
             "Run `stt-proxy start` to launch it; `stt-proxy stop` to terminate it; "
             "`stt-proxy logs [-f]` to inspect the log file; "
             "`stt-proxy config` to view effective config or "
@@ -120,6 +129,44 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite an existing config file.",
+    )
+
+    p_transcribe = sub.add_parser(
+        "transcribe",
+        help="Transcribe an audio file directly, without starting the daemon.",
+    )
+    p_transcribe.add_argument("file", help="Audio file path, or '-' to read stdin.")
+    p_transcribe.add_argument(
+        "--model",
+        required=True,
+        help="Provider/model id, for example salutespeech/general or yandex/general.",
+    )
+    p_transcribe.add_argument(
+        "--language",
+        help="Optional ISO-639-1 or BCP-47 language code (for example ru or ru-RU).",
+    )
+    p_transcribe.add_argument("--prompt", help="Optional vocabulary hint.")
+    p_transcribe.add_argument(
+        "--response-format",
+        default="json",
+        choices=("json", "text", "verbose_json", "srt", "vtt"),
+        help="Output format written to stdout (default: json).",
+    )
+    p_transcribe.add_argument(
+        "-o",
+        "--output",
+        help="Write output atomically to this file instead of stdout.",
+    )
+    # Some argv-based runners do not invoke a shell and pass `> file` to the
+    # program literally. Accept that spelling as a compatibility alias for
+    # --output; a real shell consumes both tokens before Python sees them.
+    p_transcribe.add_argument("redirect", nargs="*", help=argparse.SUPPRESS)
+
+    p_models = sub.add_parser(
+        "models", help="List model ids accepted by the --model option."
+    )
+    p_models.add_argument(
+        "--json", action="store_true", help="Print the model catalogue as JSON."
     )
 
     return parser
@@ -345,6 +392,143 @@ def _cmd_config_show(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_models(args: argparse.Namespace) -> int:
+    from .providers import SaluteProvider, YandexProvider
+
+    models = YandexProvider.list_models() + SaluteProvider.list_models()
+    if args.json:
+        print(
+            json.dumps(
+                [{"id": model.id, "owned_by": model.owned_by} for model in models],
+                ensure_ascii=False,
+            )
+        )
+    else:
+        for model in models:
+            print(model.id)
+    return 0
+
+
+async def _transcribe_file(args: argparse.Namespace) -> object:
+    from .audio import normalize
+    from .providers import (
+        ProviderNotConfiguredError,
+        SaluteProvider,
+        TranscriptionRequest,
+        YandexProvider,
+        detect_routing,
+    )
+    from .response import render
+
+    settings = load_settings(daemon=True)
+    provider_name = detect_routing(args.model)
+    if provider_name is None:
+        raise ValueError(
+            "--model must start with 'salutespeech/' or 'yandex/' "
+            "(run `stt-proxy models` for examples)"
+        )
+
+    if provider_name == "salute":
+        if not settings.salute_enabled:
+            raise ProviderNotConfiguredError(
+                "SaluteSpeech is not configured; set STT_PROXY_SALUTESPEECH_KEY"
+            )
+        provider = SaluteProvider(settings.salute_credentials or "")
+    else:
+        if not settings.yandex_enabled:
+            raise ProviderNotConfiguredError(
+                "Yandex is not configured; set STT_PROXY_YANDEX_API_KEY and "
+                "STT_PROXY_YANDEX_FOLDER_ID"
+            )
+        provider = YandexProvider(
+            api_key=settings.yandex_api_key or "",
+            folder_id=settings.yandex_folder_id or "",
+            default_model=settings.yandex_model,
+        )
+
+    if args.file == "-":
+        data = await asyncio.to_thread(sys.stdin.buffer.read)
+        filename = None
+        content_type = None
+    else:
+        path = Path(args.file).expanduser()
+        if not path.is_file():
+            raise ValueError(f"audio file does not exist: {path}")
+        data = await asyncio.to_thread(path.read_bytes)
+        filename = path.name
+        content_type = mimetypes.guess_type(path.name)[0]
+    if not data:
+        raise ValueError("audio file is empty")
+
+    audio = await normalize(data, filename, content_type)
+    result = await provider.transcribe(
+        TranscriptionRequest(
+            audio=audio,
+            model=args.model,
+            language=args.language,
+            prompt=args.prompt,
+            response_format=args.response_format,
+            deferred=True,
+        )
+    )
+    return render(result, args.response_format)
+
+
+def _cmd_transcribe(args: argparse.Namespace) -> int:
+    try:
+        output_path = _resolve_transcribe_output(args)
+        payload = asyncio.run(_transcribe_file(args))
+        rendered = _render_transcription(payload)
+        if output_path is not None:
+            _write_text_atomic(output_path, rendered)
+        else:
+            print(rendered, end="")
+    except (ConfigFileError, OSError, RuntimeError, ValueError) as exc:
+        print(f"stt-proxy: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _resolve_transcribe_output(args: argparse.Namespace) -> Path | None:
+    """Resolve --output or a literal argv-level ``> file`` compatibility pair."""
+    redirect = list(args.redirect or ())
+    if redirect and (len(redirect) != 2 or redirect[0] != ">"):
+        raise ValueError("unexpected trailing arguments; use --output FILE or '> FILE'")
+    if args.output and redirect:
+        raise ValueError("use either --output FILE or '> FILE', not both")
+    value = args.output or (redirect[1] if redirect else None)
+    return Path(value).expanduser() if value else None
+
+
+def _render_transcription(payload: object) -> str:
+    if isinstance(payload, (dict, list)):
+        return json.dumps(payload, ensure_ascii=False) + "\n"
+    text = str(payload)
+    return text if text.endswith("\n") else text + "\n"
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Replace *path* only after the complete transcription is written."""
+    parent = path.parent
+    if not parent.is_dir():
+        raise OSError(f"output directory does not exist: {parent}")
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as output:
+            output.write(text)
+            temp_path = Path(output.name)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Console entry point. Returns a process exit code."""
     parser = _build_parser()
@@ -368,6 +552,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.config_command == "init":
             return _cmd_config_init(args)
         return _cmd_config_show(args)
+    if args.command == "transcribe":
+        return _cmd_transcribe(args)
+    if args.command == "models":
+        return _cmd_models(args)
 
     # argparse with `required=True` on subparsers prevents reaching here.
     parser.error(f"unknown command: {args.command!r}")

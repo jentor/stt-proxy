@@ -1,0 +1,4 @@
+interface:
+  display_name: "STT Proxy"
+  short_description: "Transcribe audio with Yandex or SaluteSpeech"
+  default_prompt: "Use $stt-proxy to transcribe an audio file and save the result as JSON."

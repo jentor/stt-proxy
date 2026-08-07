@@ -38,9 +38,11 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 - ✅ Multipart file upload + all OpenAI form fields (`model`, `language`, `prompt`, `response_format`, `temperature`, `timestamp_granularities`)
 - ✅ Response formats: `json`, `text`, `verbose_json`, `srt`, `vtt`
 - ✅ Yandex SpeechKit STT v3 via [`yandex-ai-studio-sdk`](https://github.com/yandex-cloud/yandex-ai-studio-sdk)
+- ✅ Yandex text normalization with sentence capitalization and punctuation
 - ✅ SaluteSpeech via [`salute-speech`](https://github.com/mmua/salute_speech)
 - ✅ Automatic audio normalization via `ffmpeg` (mp4/webm/m4a/flac → WAV PCM16 16 kHz mono)
-- ✅ Provider selection by prefix (`yandex-general` → Yandex, `salute-speech` → Salute) or by `STT_PROXY_DEFAULT_PROVIDER`
+- ✅ Direct CLI transcription without a running daemon
+- ✅ Provider selection by model id (`yandex/general`, `salutespeech/general`) or by `STT_PROXY_DEFAULT_PROVIDER` for HTTP requests
 - ✅ Environment-driven configuration via `.env` / shell
 - ✅ Refuses to start when no provider credentials are configured
 - ✅ uv-managed Python project, runs on Python 3.12
@@ -60,14 +62,18 @@ uv tool install git+ssh://git@gitlab.sberautotech.ru:7999/vagayduk/stt-proxy.git
 stt-proxy config init
 $EDITOR ~/.config/stt-proxy/config.toml
 
-# 3. Start the daemon in the background
+# 3. Inspect models and transcribe directly (no daemon needed)
+stt-proxy models
+stt-proxy transcribe --model salutespeech/general ./hello.wav --output transcription.json
+
+# 4. Optionally start the OpenAI-compatible HTTP daemon
 stt-proxy start
 # => stt-proxy started (pid=...)
 # => logs: ... (run `stt-proxy logs` for the exact path)
 
-# 4. Send a test request
+# 5. Send a test request
 curl -sS -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
-    -F model=yandex-general \
+    -F model=yandex/general \
     -F file=@./hello.wav \
     -F response_format=json
 
@@ -100,7 +106,7 @@ All configuration is read from environment variables (and optionally a `.env` fi
 - **SaluteSpeech** is enabled when `STT_PROXY_SALUTESPEECH_KEY` is non-empty.
 - If neither provider is enabled, the process refuses to start (exit code `2`).
 - When exactly one provider is enabled, it is used for every request — `model` is passed through unchanged.
-- When both providers are enabled, `STT_PROXY_DEFAULT_PROVIDER` decides which one is used for unprefixed `model` values; otherwise the request must use a prefixed model (`yandex-...` / `salute-...`).
+- When both providers are enabled, `STT_PROXY_DEFAULT_PROVIDER` decides which one is used for unprefixed HTTP `model` values; otherwise use `yandex/...` or `salutespeech/...`.
 
 Inspect the effective configuration with:
 
@@ -123,7 +129,7 @@ There are two ways to run stt-proxy:
 task install-tool      # runs: uv tool install -e .
 ```
 
-This installs the project as a uv-managed tool and puts `stt-proxy` on your `PATH` (typically under `~/.local/bin`). After install, the four subcommands are available globally, independent of the project's `.venv`:
+This installs the project as a uv-managed tool and puts `stt-proxy` on your `PATH` (typically under `~/.local/bin`). The commands are then available globally, independent of the project's `.venv`:
 
 ```bash
 # Launch as a detached background daemon. Env vars come from the shell —
@@ -140,6 +146,9 @@ stt-proxy stop                # SIGTERM, then SIGKILL after 10s
 
 stt-proxy config               # show effective config (secrets masked)
 stt-proxy config init          # create ~/.config/stt-proxy/config.toml
+
+stt-proxy models               # list accepted provider/model ids
+stt-proxy transcribe --model yandex/general ./speech.mp3 --output transcription.json
 ```
 
 Note: `stt-proxy start` polls for the daemon's PID file for up to 30 seconds
@@ -211,7 +220,7 @@ task run
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-The `stt-proxy` console script (installed by `task install-tool` as a uv tool) is the CLI documented above (`start` / `stop` / `logs`). For ad-hoc foreground runs from the project venv without installing the tool:
+The `stt-proxy` console script is the CLI documented above. For ad-hoc foreground runs from the project venv without installing the tool:
 
 ```bash
 uv run uvicorn app.main:app            # foreground, no reload
@@ -228,10 +237,11 @@ curl -sS http://127.0.0.1:8000/v1/audio/providers
 # OpenAI-compatible model catalogue (also available at /models)
 curl -sS http://127.0.0.1:8000/v1/models
 # => {"object":"list","data":[
-#       {"id":"yandex-general","object":"model","created":0,"owned_by":"yandex"},
-#       {"id":"yandex-general:rc","object":"model","created":0,"owned_by":"yandex"},
+#       {"id":"yandex/general","object":"model","created":0,"owned_by":"yandex"},
+#       {"id":"yandex/general:rc","object":"model","created":0,"owned_by":"yandex"},
 #       ...
-#       {"id":"salute-speech","object":"model","created":0,"owned_by":"salute-speech"}
+#       {"id":"salutespeech/general","object":"model","created":0,"owned_by":"salutespeech"},
+#       {"id":"salutespeech/callcenter","object":"model","created":0,"owned_by":"salutespeech"}
 #     ]}
 ```
 
@@ -338,8 +348,9 @@ The proxy decides which backend to call based on the request's `model` field:
 
 | `model` value | Routing |
 |---|---|
-| `yandex-*` / `yc-*` / `speechkit-*` | Yandex SpeechKit, the suffix becomes the model tag (e.g. `yandex-general:rc` → `general:rc`) |
-| `salute-*` / `sber-*` | SaluteSpeech |
+| `yandex/*` | Yandex SpeechKit; the suffix becomes the upstream model tag (for example `yandex/general:rc` → `general:rc`) |
+| `salutespeech/*` | SaluteSpeech; the suffix is sent as `options.model` (for example `salutespeech/callcenter`) |
+| Legacy `yandex-*`, `yc-*`, `speechkit-*`, `salute-*`, `sber-*` | Kept for compatibility |
 | Anything else (e.g. `whisper-1`) | `STT_PROXY_DEFAULT_PROVIDER` if set, else the only configured provider (if there is exactly one), else 400 |
 
 Examples:
@@ -347,12 +358,12 @@ Examples:
 ```bash
 # Yandex with explicit model tag
 curl -X POST .../v1/audio/transcriptions \
-    -F model=yandex-general:rc \
+    -F model=yandex/general:rc \
     -F file=@speech.wav
 
 # SaluteSpeech
 curl -X POST .../v1/audio/transcriptions \
-    -F model=salute-speech \
+    -F model=salutespeech/general \
     -F file=@speech.wav
 
 # Use the default provider (configured via STT_PROXY_DEFAULT_PROVIDER or auto-detected)
@@ -361,7 +372,7 @@ curl -X POST .../v1/audio/transcriptions \
     -F file=@speech.wav
 ```
 
-`yandex-*` model values can also be passed directly to the `STT_PROXY_YANDEX_MODEL` configuration; the SDK's underlying STT v3 endpoint is the same either way.
+Run `stt-proxy models` (or `stt-proxy models --json`) to inspect the curated catalogue. Provider APIs may accept additional model names; any non-empty suffix is passed through, so `salutespeech/<new-model>` does not require a tool release.
 
 ---
 

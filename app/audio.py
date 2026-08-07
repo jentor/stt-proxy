@@ -79,8 +79,40 @@ _MIME_MAP: Final[dict[str, AudioFormat]] = {
 }
 
 
-def detect_format(filename: str | None, content_type: str | None) -> AudioFormat:
-    """Return the audio container based on filename and Content-Type header."""
+def _detect_format_from_bytes(data: bytes | None) -> AudioFormat:
+    """Best-effort container detection from well-known file signatures."""
+    if not data:
+        return AudioFormat.UNKNOWN
+    head = data[:64]
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return AudioFormat.WAV
+    if head.startswith(b"fLaC"):
+        return AudioFormat.FLAC
+    if head.startswith(b"OggS"):
+        return AudioFormat.OGG
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return AudioFormat.WEBM
+    if head.startswith(b"ID3") or (
+        len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0
+    ):
+        return AudioFormat.MP3
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        brands = head[8:32].lower()
+        if any(brand in brands for brand in (b"m4a", b"m4b", b"m4p")):
+            return AudioFormat.M4A
+        return AudioFormat.MP4
+    return AudioFormat.UNKNOWN
+
+
+def detect_format(
+    filename: str | None,
+    content_type: str | None,
+    data: bytes | None = None,
+) -> AudioFormat:
+    """Return the audio container, preferring its actual byte signature."""
+    detected = _detect_format_from_bytes(data)
+    if detected is not AudioFormat.UNKNOWN:
+        return detected
     if filename:
         ext = os.path.splitext(filename)[1].lower()
         if ext in _EXT_MAP:
@@ -165,10 +197,6 @@ def _transcode_sync(input_bytes: bytes, input_format: AudioFormat | None) -> byt
             "pcm_s16le",
             out_path,
         ]
-        if input_format and input_format is not AudioFormat.UNKNOWN:
-            # Insert `-f <format>` before `-i` to help ffmpeg detect the container.
-            cmd.insert(-3, "-f")
-            cmd.insert(-3, input_format.value)
         proc = subprocess.run(cmd, capture_output=True)
         if proc.returncode != 0:
             stderr = proc.stderr.decode("utf-8", errors="replace")
@@ -210,7 +238,7 @@ async def normalize(
         untouched so each provider can use its preferred path.
       * Otherwise, transcode to 16 kHz mono WAV PCM16.
     """
-    fmt = detect_format(filename, content_type)
+    fmt = detect_format(filename, content_type, data)
 
     if always_transcode:
         wav = await transcode_to_wav_pcm16(

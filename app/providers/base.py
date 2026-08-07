@@ -55,6 +55,9 @@ class TranscriptionRequest:
     temperature: float | None = None
     response_format: str = "json"
     timestamp_granularities: Sequence[str] = ()
+    # Direct CLI file transcription uses providers' long-running/deferred mode.
+    # The HTTP endpoint keeps its existing low-latency mode where available.
+    deferred: bool = False
 
 
 @dataclass(slots=True)
@@ -80,7 +83,8 @@ class Provider(ABC):
         """Run a transcription and return a normalized result."""
         raise NotImplementedError
 
-    def list_models(self) -> list[ModelInfo]:
+    @classmethod
+    def list_models(cls) -> list[ModelInfo]:
         """Return the list of models this provider exposes for ``GET /v1/models``.
 
         Override for providers with dynamic model catalogues. The default
@@ -97,16 +101,29 @@ class Provider(ABC):
 # ---------------------------------------------------------------------------
 
 
-YANDEX_PREFIXES: tuple[str, ...] = ("yandex-", "yandex_", "yc-", "speechkit-")
-SALUTE_PREFIXES: tuple[str, ...] = ("salute-", "salute_", "sber-")
+YANDEX_PREFIXES: tuple[str, ...] = (
+    "yandex/",
+    "yandex-",
+    "yandex_",
+    "yc-",
+    "speechkit-",
+)
+SALUTE_PREFIXES: tuple[str, ...] = (
+    "salutespeech/",
+    "salute/",
+    "sber/",
+    "salute-",
+    "salute_",
+    "sber-",
+)
 
 
 def detect_routing(model: str | None) -> str | None:
     """Return provider name implied by the request ``model`` field, or None.
 
     Routing is purely by prefix so we don't hardcode a model catalogue:
-      * ``yandex-...`` / ``yc-...`` / ``speechkit-...`` -> ``yandex``
-      * ``salute-...`` / ``sber-...``                  -> ``salute``
+      * ``yandex/...`` (and legacy aliases)      -> ``yandex``
+      * ``salutespeech/...`` (and legacy aliases) -> ``salute``
     """
     if not model:
         return None
@@ -140,4 +157,16 @@ def yandex_model_tag(model: str, default: str) -> str:
         and "_" not in model.replace("-", "_")
     ):
         return model
+    return default
+
+
+def salute_model_tag(model: str, default: str = "general") -> str:
+    """Extract the upstream SaluteSpeech model name from a routed model id."""
+    if not model:
+        return default
+    if model.lower() in {"salute-speech", "salute_speech"}:
+        return default
+    for prefix in SALUTE_PREFIXES:
+        if model.lower().startswith(prefix):
+            return model[len(prefix) :] or default
     return default
