@@ -155,31 +155,14 @@ def _build_result(result: Any, fallback_language: str) -> TranscriptionResult:
     language = getattr(result, "language_code", None) or fallback_language
     duration = getattr(result, "duration", None)
 
-    segments: list[TranscriptionSegment] = []
-    raw_segments = getattr(result, "segments", None) or []
-    for idx, seg in enumerate(raw_segments):
-        seg_text = getattr(seg, "text", "") or ""
-        seg_start = getattr(seg, "start_time_ms", None)
-        seg_end = getattr(seg, "end_time_ms", None)
-        words_raw = getattr(seg, "words", None) or []
-        words: list[dict] = []
-        for w in words_raw:
-            words.append(
-                {
-                    "word": getattr(w, "text", "") or "",
-                    "start": (getattr(w, "start_time_ms", 0) or 0) / 1000.0,
-                    "end": (getattr(w, "end_time_ms", 0) or 0) / 1000.0,
-                }
-            )
-        segments.append(
-            TranscriptionSegment(
-                id=idx,
-                start=(seg_start or 0) / 1000.0,
-                end=(seg_end or 0) / 1000.0,
-                text=seg_text,
-                words=words,
-            )
-        )
+    segments = _build_v3_segments(result)
+    if not segments:
+        # Compatibility with older SDK result objects which exposed a flat
+        # ``segments`` collection instead of channels and utterances.
+        segments = _build_legacy_segments(result)
+
+    if duration is None and segments:
+        duration = max(segment.end for segment in segments)
 
     return TranscriptionResult(
         text=text,
@@ -187,3 +170,78 @@ def _build_result(result: Any, fallback_language: str) -> TranscriptionResult:
         duration=float(duration) if duration is not None else None,
         segments=segments,
     )
+
+
+def _build_v3_segments(result: Any) -> list[TranscriptionSegment]:
+    """Extract phrase and word timings from the current SpeechKit v3 SDK."""
+    channels = getattr(result, "channels", None) or {}
+    if isinstance(channels, dict):
+        channel_values = (channels[key] for key in sorted(channels))
+    else:
+        channel_values = iter(channels)
+
+    segments: list[TranscriptionSegment] = []
+    for channel in channel_values:
+        for utterance in getattr(channel, "utterances", None) or ():
+            # Normalized refinements contain literature-mode capitalization and
+            # punctuation. Fall back to raw finals when no refinement arrived.
+            parts = getattr(utterance, "final_refinements", None) or ()
+            if not parts:
+                parts = getattr(utterance, "finals", None) or ()
+
+            if parts:
+                for part in parts:
+                    segments.append(_segment_from_v3_part(len(segments), part))
+                continue
+
+            # Defensive fallback for SDK-compatible test doubles or future SDK
+            # versions which expose only the aggregate utterance.
+            segments.append(_segment_from_v3_part(len(segments), utterance))
+    return segments
+
+
+def _segment_from_v3_part(segment_id: int, part: Any) -> TranscriptionSegment:
+    timespan = getattr(part, "timespan", None)
+    start = (getattr(timespan, "start_time_ms", 0) or 0) / 1000.0
+    end = (getattr(timespan, "end_time_ms", 0) or 0) / 1000.0
+    words = [_word_with_timespan(word) for word in getattr(part, "words", None) or ()]
+    return TranscriptionSegment(
+        id=segment_id,
+        start=start,
+        end=end,
+        text=getattr(part, "text", "") or "",
+        words=words,
+    )
+
+
+def _word_with_timespan(word: Any) -> dict[str, Any]:
+    timespan = getattr(word, "timespan", None)
+    return {
+        "word": getattr(word, "text", "") or "",
+        "start": (getattr(timespan, "start_time_ms", 0) or 0) / 1000.0,
+        "end": (getattr(timespan, "end_time_ms", 0) or 0) / 1000.0,
+    }
+
+
+def _build_legacy_segments(result: Any) -> list[TranscriptionSegment]:
+    segments: list[TranscriptionSegment] = []
+    for idx, segment in enumerate(getattr(result, "segments", None) or ()):
+        words = []
+        for word in getattr(segment, "words", None) or ():
+            words.append(
+                {
+                    "word": getattr(word, "text", "") or "",
+                    "start": (getattr(word, "start_time_ms", 0) or 0) / 1000.0,
+                    "end": (getattr(word, "end_time_ms", 0) or 0) / 1000.0,
+                }
+            )
+        segments.append(
+            TranscriptionSegment(
+                id=idx,
+                start=(getattr(segment, "start_time_ms", 0) or 0) / 1000.0,
+                end=(getattr(segment, "end_time_ms", 0) or 0) / 1000.0,
+                text=getattr(segment, "text", "") or "",
+                words=words,
+            )
+        )
+    return segments
