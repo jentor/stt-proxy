@@ -44,7 +44,7 @@ def normalize_format(value: str | None) -> ResponseFormat:
     value = value.strip().lower()
     if value == "diarized_json":
         raise UnsupportedResponseFormat(
-            "diarized_json is not supported: neither Yandex nor SaluteSpeech returns speaker labels"
+            "diarized_json is not supported: Yandex does not return speaker labels"
         )
     if value not in SUPPORTED_FORMATS:
         raise UnsupportedResponseFormat(

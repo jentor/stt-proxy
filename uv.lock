@@ -701,15 +701,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pydub"
-version = "0.25.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/fe/9a/e6bca0eed82db26562c73b5076539a4a08d3cffd19c3cc5913a3e61145fd/pydub-0.25.1.tar.gz", hash = "sha256:980a33ce9949cab2a569606b65674d748ecbca4f0796887fd6f46173a7b0d30f", size = 38326, upload-time = "2021-03-10T02:09:54.659Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/53/d78dc063216e62fc55f6b2eebb447f6a4b0a59f55c8406376f76bf959b08/pydub-0.25.1-py2.py3-none-any.whl", hash = "sha256:65617e33033874b59d87db603aa1ed450633288aefead953b30bded59cb599a6", size = 32327, upload-time = "2021-03-10T02:09:53.503Z" },
-]
-
-[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -848,21 +839,6 @@ wheels = [
 ]
 
 [[package]]
-name = "salute-speech"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "pydub" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/99/b0/e587d4e85cef0613445b6e99a9a8185681be0ac4ba3a8fafde89f1570b56/salute_speech-2.0.0.tar.gz", hash = "sha256:5e8c84a4cb92feeb7a3bdd6097ef5ff2d92c6d1b6b65f030516de4a807d23e84", size = 35625, upload-time = "2025-08-30T17:11:01.657Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/e7/8de708f9ee1c9b7e5a0950966685e4485f9adcf12fd0c150c4c31987e04c/salute_speech-2.0.0-py3-none-any.whl", hash = "sha256:bf6b18caf9c7b58f13c57fd7f158fa8cebb994bffdf93930890ad29b2d66b744", size = 28271, upload-time = "2025-08-30T17:11:00.491Z" },
-]
-
-[[package]]
 name = "setuptools"
 version = "82.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -904,7 +880,6 @@ dependencies = [
     { name = "platformdirs" },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
-    { name = "salute-speech" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "yandex-ai-studio-sdk" },
 ]
@@ -923,7 +898,6 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "salute-speech", specifier = ">=2.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "yandex-ai-studio-sdk", specifier = ">=0.20.0" },
 ]

@@ -24,9 +24,6 @@ Pick the right tool for the experiment:
    # "What if no Yandex creds at all?"
    STT_PROXY_YANDEX_API_KEY= STT_PROXY_YANDEX_FOLDER_ID= task run
 
-   # "What if SaluteSpeech is also enabled?"
-   STT_PROXY_SALUTESPEECH_KEY=test task run
-
    # "Bind to a different port just for this run"
    STT_PROXY_PORT=15000 task run
    ```
@@ -41,7 +38,6 @@ Pick the right tool for the experiment:
    cat > .env.test.local <<EOF
    STT_PROXY_YANDEX_API_KEY=dummy
    STT_PROXY_YANDEX_FOLDER_ID=dummy
-   STT_PROXY_SALUTESPEECH_KEY=dummy
    EOF
 
    UV_ENV_FILE=.env.test.local task run

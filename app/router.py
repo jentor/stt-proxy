@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import logging
+from secrets import compare_digest
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .audio import normalize
@@ -14,14 +24,35 @@ from .providers import (
     ProviderError,
     ProviderNotConfiguredError,
     TranscriptionRequest,
-    detect_routing,
 )
 from .response import normalize_format, render
 
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+
+def require_api_key(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
+    configured = request.app.state.settings.api_key
+    if configured is None:
+        return
+
+    scheme, _, credential = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not compare_digest(
+        credential.encode(), configured.encode()
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": {"message": "Invalid API key", "type": "authentication_error"}
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 _TEXT_BASED_FORMATS = {"text", "srt", "vtt"}
@@ -33,9 +64,7 @@ async def create_transcription(
     file: Annotated[UploadFile, File(description="Audio file to transcribe")],
     model: Annotated[
         str,
-        Form(
-            description="Model id used for routing; must be prefixed with 'yandex-' or 'salute-' when both providers are configured"
-        ),
+        Form(description="Yandex model id, for example yandex/general"),
     ],
     language: Annotated[str | None, Form()] = None,
     prompt: Annotated[str | None, Form()] = None,
@@ -43,8 +72,7 @@ async def create_transcription(
     temperature: Annotated[float | None, Form()] = None,
     timestamp_granularities: Annotated[list[str] | None, Form()] = None,
 ):
-    """Transcribe audio using the configured Yandex / Salute backend."""
-    settings = request.app.state.settings
+    """Transcribe audio using Yandex SpeechKit."""
     providers: dict[str, Provider] = request.app.state.providers
 
     # 1. Validate response_format up-front so we can fail fast with a clean 400.
@@ -56,42 +84,8 @@ async def create_transcription(
             detail={"error": {"message": str(exc), "type": "invalid_request_error"}},
         ) from exc
 
-    # 2. Pick a provider. Routing precedence:
-    #    a) explicit prefix in `model`
-    #    b) STT_PROXY_DEFAULT_PROVIDER
-    #    c) sole configured provider (if exactly one)
-    routed = detect_routing(model)
-    if routed:
-        if routed not in providers:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "message": (
-                            f"Model '{model}' requests provider '{routed}', but it is not configured. "
-                            f"Available providers: {sorted(providers.keys())}."
-                        ),
-                        "type": "invalid_request_error",
-                    }
-                },
-            )
-        provider_name = routed
-    else:
-        try:
-            provider_name = settings.resolve_default_provider_or_fail()
-        except RuntimeError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "message": (
-                            f"{exc} Prefix the `model` field with 'yandex-' or 'salute-' to disambiguate."
-                        ),
-                        "type": "invalid_request_error",
-                    }
-                },
-            ) from exc
-
+    # 2. Yandex is the only backend.
+    provider_name = "yandex"
     provider = providers[provider_name]
 
     # 3. Read the upload into memory. The OpenAI API supports up to 25 MB
@@ -194,17 +188,14 @@ async def list_providers(request: Request) -> dict:
                 "enabled": settings.yandex_enabled,
                 "model": settings.yandex_model if settings.yandex_enabled else None,
             },
-            {"name": "salute", "enabled": settings.salute_enabled, "model": None},
         ],
-        "default_provider": settings.effective_default_provider(),
+        "default_provider": "yandex" if settings.yandex_enabled else None,
     }
 
 
 # OpenAI's ``/v1/models`` endpoint returns the list of models a client can
-# use. Our backend providers don't expose a model catalogue API (Yandex
-# takes a model tag, SaluteSpeech has no model list at all), so the
-# responses are static per provider. We aggregate them across every
-# enabled provider.
+# use. Yandex takes a model tag rather than exposing a catalogue API, so the
+# response is a curated static list.
 _MODEL_CREATED_PLACEHOLDER: int = 0
 
 
@@ -225,7 +216,7 @@ def _render_models(providers: dict) -> dict:
 
 @router.get("/v1/models")
 async def list_models(request: Request) -> dict:
-    """OpenAI-compatible model catalogue (aggregated across enabled providers)."""
+    """OpenAI-compatible Yandex model catalogue."""
     return _render_models(request.app.state.providers)
 
 

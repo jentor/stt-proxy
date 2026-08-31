@@ -10,17 +10,13 @@ def test_models_lists_ids_without_credentials(capsys) -> None:
 
     output = capsys.readouterr().out.splitlines()
     assert "yandex/general" in output
-    assert "salutespeech/general" in output
 
 
 def test_models_json(capsys) -> None:
     assert main(["models", "--json"]) == 0
 
     output = json.loads(capsys.readouterr().out)
-    assert {item["id"] for item in output} >= {
-        "yandex/general",
-        "salutespeech/general",
-    }
+    assert {item["id"] for item in output} >= {"yandex/general"}
 
 
 def test_transcribe_accepts_literal_redirect(monkeypatch, tmp_path, capsys) -> None:
@@ -35,7 +31,7 @@ def test_transcribe_accepts_literal_redirect(monkeypatch, tmp_path, capsys) -> N
             [
                 "transcribe",
                 "--model",
-                "salutespeech/general",
+                "yandex/general",
                 "audio.m4a",
                 ">",
                 str(output),

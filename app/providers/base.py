@@ -108,22 +108,12 @@ YANDEX_PREFIXES: tuple[str, ...] = (
     "yc-",
     "speechkit-",
 )
-SALUTE_PREFIXES: tuple[str, ...] = (
-    "salutespeech/",
-    "salute/",
-    "sber/",
-    "salute-",
-    "salute_",
-    "sber-",
-)
 
 
 def detect_routing(model: str | None) -> str | None:
     """Return provider name implied by the request ``model`` field, or None.
 
-    Routing is purely by prefix so we don't hardcode a model catalogue:
-      * ``yandex/...`` (and legacy aliases)      -> ``yandex``
-      * ``salutespeech/...`` (and legacy aliases) -> ``salute``
+    Routing is purely by prefix so we don't hardcode a model catalogue.
     """
     if not model:
         return None
@@ -131,9 +121,6 @@ def detect_routing(model: str | None) -> str | None:
     for prefix in YANDEX_PREFIXES:
         if m.startswith(prefix):
             return "yandex"
-    for prefix in SALUTE_PREFIXES:
-        if m.startswith(prefix):
-            return "salute"
     return None
 
 
@@ -157,16 +144,4 @@ def yandex_model_tag(model: str, default: str) -> str:
         and "_" not in model.replace("-", "_")
     ):
         return model
-    return default
-
-
-def salute_model_tag(model: str, default: str = "general") -> str:
-    """Extract the upstream SaluteSpeech model name from a routed model id."""
-    if not model:
-        return default
-    if model.lower() in {"salute-speech", "salute_speech"}:
-        return default
-    for prefix in SALUTE_PREFIXES:
-        if model.lower().startswith(prefix):
-            return model[len(prefix) :] or default
     return default

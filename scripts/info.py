@@ -15,9 +15,7 @@ def main() -> int:
         return 2
 
     print(f"  yandex_enabled: {s.yandex_enabled}")
-    print(f"  salute_enabled: {s.salute_enabled}")
     print(f"  providers:      {s.enabled_providers}")
-    print(f"  default:        {s.effective_default_provider()}")
     print(f"  host:port:      {s.host}:{s.port}")
     return 0
 

@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from uvicorn.config import LOGGING_CONFIG
 
 from .config import Settings, load_settings
-from .providers import Provider, SaluteProvider, YandexProvider
+from .providers import Provider, YandexProvider
 from .router import router
 
 
@@ -46,11 +46,6 @@ def _build_providers(settings: Settings) -> dict[str, Provider]:
             settings.yandex_folder_id,
             settings.yandex_model,
         )
-    if settings.salute_enabled:
-        providers["salute"] = SaluteProvider(
-            credentials=settings.salute_credentials or ""
-        )  # type: ignore[arg-type]
-        logging.getLogger(__name__).info("SaluteSpeech provider enabled")
     return providers
 
 
@@ -70,9 +65,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="stt-proxy",
         description=(
-            "OpenAI Audio API compatible proxy for Yandex SpeechKit and Sber SaluteSpeech. "
-            "POST /v1/audio/transcriptions accepts the OpenAI multipart shape and routes "
-            "to the configured backend."
+            "OpenAI Audio API compatible proxy for Yandex SpeechKit. "
+            "POST /v1/audio/transcriptions accepts the OpenAI multipart shape."
         ),
         version="0.1.0",
         lifespan=lifespan,

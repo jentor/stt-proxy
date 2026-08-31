@@ -66,17 +66,12 @@ _CONFIG_TEMPLATE = """\
 # yandex_folder_id = "b1gxxxxxxxxxxxxxxxxxx"
 # yandex_model = "general"                # general, general:rc, deferred-general, ...
 
-# ----- SaluteSpeech -----
-# salutespeech_key = "base64(client_id:client_secret)"
-
-# ----- Routing (only relevant when both providers are configured) -----
-# default_provider = "yandex"             # or "salute"
-
 # ----- HTTP server -----
 # host = "127.0.0.1"
 # port = 8000
 # log_level = "INFO"                      # DEBUG / INFO / WARNING / ERROR
 # workers = 1
+# api_key = "replace-with-at-least-32-random-characters"
 """
 
 
@@ -139,7 +134,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_transcribe.add_argument(
         "--model",
         required=True,
-        help="Provider/model id, for example salutespeech/general or yandex/general.",
+        help="Yandex model id, for example yandex/general.",
     )
     p_transcribe.add_argument(
         "--language",
@@ -354,12 +349,9 @@ def _cmd_config_show(_args: argparse.Namespace) -> int:
     yandex_suffix = (
         f" (model={settings.yandex_model})" if settings.yandex_enabled else ""
     )
-    salute_state = "enabled" if settings.salute_enabled else "disabled"
-    default_provider = settings.default_provider or "(auto)"
-
+    api_key = _mask_secret(settings.api_key)
     yandex_api_key = _mask_secret(settings.yandex_api_key)
     yandex_folder_id = settings.yandex_folder_id or "(not set)"
-    salutespeech_key = _mask_secret(settings.salutespeech_key)
 
     print(
         "stt-proxy configuration (daemon view)\n"
@@ -369,21 +361,15 @@ def _cmd_config_show(_args: argparse.Namespace) -> int:
         f"    port       = {settings.port}\n"
         f"    log_level  = {settings.log_level}\n"
         f"    workers    = {settings.workers}\n"
+        f"    api_key    = {api_key}\n"
         "\n"
         "  Providers\n"
         f"    yandex     = {yandex_state}{yandex_suffix}\n"
-        f"    salute     = {salute_state}\n"
-        "\n"
-        "  Routing\n"
-        f"    default_provider = {default_provider}\n"
         "\n"
         "  Yandex\n"
         f"    api_key    = {yandex_api_key}\n"
         f"    folder_id  = {yandex_folder_id}\n"
         f"    model      = {settings.yandex_model}\n"
-        "\n"
-        "  SaluteSpeech\n"
-        f"    key        = {salutespeech_key}\n"
         "\n"
         "  Sources\n"
         "    env_file          = (not loaded)\n"
@@ -393,9 +379,9 @@ def _cmd_config_show(_args: argparse.Namespace) -> int:
 
 
 def _cmd_models(args: argparse.Namespace) -> int:
-    from .providers import SaluteProvider, YandexProvider
+    from .providers import YandexProvider
 
-    models = YandexProvider.list_models() + SaluteProvider.list_models()
+    models = YandexProvider.list_models()
     if args.json:
         print(
             json.dumps(
@@ -413,7 +399,6 @@ async def _transcribe_file(args: argparse.Namespace) -> object:
     from .audio import normalize
     from .providers import (
         ProviderNotConfiguredError,
-        SaluteProvider,
         TranscriptionRequest,
         YandexProvider,
         detect_routing,
@@ -421,30 +406,21 @@ async def _transcribe_file(args: argparse.Namespace) -> object:
     from .response import render
 
     settings = load_settings(daemon=True)
-    provider_name = detect_routing(args.model)
-    if provider_name is None:
+    if detect_routing(args.model) != "yandex":
         raise ValueError(
-            "--model must start with 'salutespeech/' or 'yandex/' "
-            "(run `stt-proxy models` for examples)"
+            "--model must start with 'yandex/' (run `stt-proxy models` for examples)"
         )
 
-    if provider_name == "salute":
-        if not settings.salute_enabled:
-            raise ProviderNotConfiguredError(
-                "SaluteSpeech is not configured; set STT_PROXY_SALUTESPEECH_KEY"
-            )
-        provider = SaluteProvider(settings.salute_credentials or "")
-    else:
-        if not settings.yandex_enabled:
-            raise ProviderNotConfiguredError(
-                "Yandex is not configured; set STT_PROXY_YANDEX_API_KEY and "
-                "STT_PROXY_YANDEX_FOLDER_ID"
-            )
-        provider = YandexProvider(
-            api_key=settings.yandex_api_key or "",
-            folder_id=settings.yandex_folder_id or "",
-            default_model=settings.yandex_model,
+    if not settings.yandex_enabled:
+        raise ProviderNotConfiguredError(
+            "Yandex is not configured; set STT_PROXY_YANDEX_API_KEY and "
+            "STT_PROXY_YANDEX_FOLDER_ID"
         )
+    provider = YandexProvider(
+        api_key=settings.yandex_api_key or "",
+        folder_id=settings.yandex_folder_id or "",
+        default_model=settings.yandex_model,
+    )
 
     if args.file == "-":
         data = await asyncio.to_thread(sys.stdin.buffer.read)

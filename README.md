@@ -1,17 +1,17 @@
 # stt-proxy
 
-An OpenAI-Audio-API compatible proxy for **[Yandex SpeechKit](https://yandex.cloud/ru-kz/docs/speechkit/)** and **[Sber SaluteSpeech](https://developers.sber.ru/docs/ru/salutespeech/api/overview)**.
+An OpenAI-Audio-API compatible proxy for **[Yandex SpeechKit](https://yandex.cloud/ru-kz/docs/speechkit/)**.
 
-It exposes the same wire format as OpenAI's `/v1/audio/transcriptions` endpoint on the front side, so any client built for OpenAI Whisper / gpt-4o-transcribe can talk to Yandex or SaluteSpeech instead — without code changes.
+It exposes the same wire format as OpenAI's `/v1/audio/transcriptions` endpoint, so clients built for OpenAI Whisper / gpt-4o-transcribe can talk to Yandex without code changes.
 
 ```
 ┌──────────────────┐      ┌─────────────────┐      ┌────────────────────┐
 │ OpenAI client    │ ───► │  stt-proxy      │ ───► │ Yandex SpeechKit   │
-│ (any SDK / curl) │      │  (FastAPI)      │      │  or SaluteSpeech   │
+│ (any SDK / curl) │      │  (FastAPI)      │      │                    │
 └──────────────────┘      └─────────────────┘      └────────────────────┘
 ```
 
-The proxy is intentionally small: it parses the OpenAI multipart request, picks a provider based on the `model` field, transcodes unsupported audio containers via `ffmpeg`, calls the appropriate SDK, and renders the response in the OpenAI shape (`json`, `text`, `verbose_json`, `srt`, `vtt`).
+The proxy is intentionally small: it parses the OpenAI multipart request, transcodes unsupported audio containers via `ffmpeg`, calls Yandex, and renders the response in the OpenAI shape (`json`, `text`, `verbose_json`, `srt`, `vtt`).
 
 ---
 
@@ -22,7 +22,7 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 - [Configuration](#configuration)
 - [Running the server](#running-the-server)
 - [API reference](#api-reference)
-- [Provider routing](#provider-routing)
+- [Yandex model names](#yandex-model-names)
 - [Supported audio formats](#supported-audio-formats)
 - [Supported response formats](#supported-response-formats)
 - [Project layout](#project-layout)
@@ -39,10 +39,9 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 - ✅ Response formats: `json`, `text`, `verbose_json`, `srt`, `vtt`
 - ✅ Yandex SpeechKit STT v3 via [`yandex-ai-studio-sdk`](https://github.com/yandex-cloud/yandex-ai-studio-sdk)
 - ✅ Yandex text normalization with sentence capitalization and punctuation
-- ✅ SaluteSpeech via [`salute-speech`](https://github.com/mmua/salute_speech)
 - ✅ Automatic audio normalization via `ffmpeg` (mp4/webm/m4a/flac → WAV PCM16 16 kHz mono)
 - ✅ Direct CLI transcription without a running daemon
-- ✅ Provider selection by model id (`yandex/general`, `salutespeech/general`) or by `STT_PROXY_DEFAULT_PROVIDER` for HTTP requests
+- ✅ Optional Bearer-token authentication for every API route
 - ✅ Environment-driven configuration via `.env` / shell
 - ✅ Refuses to start when no provider credentials are configured
 - ✅ uv-managed Python project, runs on Python 3.12
@@ -55,16 +54,16 @@ The proxy is intentionally small: it parses the OpenAI multipart request, picks 
 ```bash
 # 1. Install the CLI tool directly from the Git repo (registers
 #    `stt-proxy` on PATH — no clone needed)
-uv tool install git+ssh://git@gitlab.sberautotech.ru:7999/vagayduk/stt-proxy.git
+uv tool install git+https://github.com/jentor/stt-proxy.git
 # To pin a version, append @vX.Y.Z to the URL.
 
-# 2. Create the config file and fill in at least one provider's keys
+# 2. Create the config file and fill in the Yandex credentials
 stt-proxy config init
 $EDITOR ~/.config/stt-proxy/config.toml
 
 # 3. Inspect models and transcribe directly (no daemon needed)
 stt-proxy models
-stt-proxy transcribe --model salutespeech/general ./hello.wav --output transcription.json
+stt-proxy transcribe --model yandex/general ./hello.wav --output transcription.json
 
 # 4. Optionally start the OpenAI-compatible HTTP daemon
 stt-proxy start
@@ -80,7 +79,7 @@ curl -sS -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
 # Other useful commands: `stt-proxy stop`, `stt-proxy logs [-f]`, `stt-proxy config`
 ```
 
-If neither provider is configured, the process exits at startup with exit code `2` and a clear error message on stderr.
+If Yandex is not configured, the process exits at startup with exit code `2` and a clear error message on stderr.
 
 ---
 
@@ -94,19 +93,16 @@ All configuration is read from environment variables (and optionally a `.env` fi
 | `STT_PROXY_PORT` | `8000` | HTTP bind port |
 | `STT_PROXY_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `STT_PROXY_WORKERS` | `1` | uvicorn workers (keep at 1 — provider SDKs may not be fork-safe) |
+| `STT_PROXY_API_KEY` | _none_ | Optional Bearer token required by all API routes; at least 32 characters |
 | `STT_PROXY_YANDEX_API_KEY` | _none_ | Yandex Cloud API key |
 | `STT_PROXY_YANDEX_FOLDER_ID` | _none_ | Yandex Cloud folder ID (must be set together with the API key) |
 | `STT_PROXY_YANDEX_MODEL` | `general` | Yandex STT model tag (`general`, `general:rc`, `deferred-general`, ...) |
-| `STT_PROXY_SALUTESPEECH_KEY` | _none_ | SaluteSpeech auth key: base64 of `client_id:client_secret` (see [SaluteSpeech docs](https://developers.sber.ru/docs/ru/salutespeech/rest/post-token)) |
-| `STT_PROXY_DEFAULT_PROVIDER` | _auto_ | `yandex` or `salute` — used when both providers are configured and the request `model` has no prefix |
 
 ### Provider enable rules
 
 - **Yandex** is enabled only when **both** `STT_PROXY_YANDEX_API_KEY` and `STT_PROXY_YANDEX_FOLDER_ID` are present. Setting one without the other disables the provider with a warning.
-- **SaluteSpeech** is enabled when `STT_PROXY_SALUTESPEECH_KEY` is non-empty.
-- If neither provider is enabled, the process refuses to start (exit code `2`).
-- When exactly one provider is enabled, it is used for every request — `model` is passed through unchanged.
-- When both providers are enabled, `STT_PROXY_DEFAULT_PROVIDER` decides which one is used for unprefixed HTTP `model` values; otherwise use `yandex/...` or `salutespeech/...`.
+- If Yandex is not enabled, the process refuses to start (exit code `2`).
+- Every request goes to Yandex. A `yandex/...` model suffix is passed upstream; other model ids use the configured default model.
 
 Inspect the effective configuration with:
 
@@ -232,7 +228,7 @@ uv run python -m app.main              # same, through app.main.run()
 ```bash
 # Which providers are enabled right now
 curl -sS http://127.0.0.1:8000/v1/audio/providers
-# => {"providers":[{"name":"yandex","enabled":true,"model":"general"},{"name":"salute","enabled":false,"model":null}],"default_provider":"yandex"}
+# => {"providers":[{"name":"yandex","enabled":true,"model":"general"}],"default_provider":"yandex"}
 
 # OpenAI-compatible model catalogue (also available at /models)
 curl -sS http://127.0.0.1:8000/v1/models
@@ -240,12 +236,12 @@ curl -sS http://127.0.0.1:8000/v1/models
 #       {"id":"yandex/general","object":"model","created":0,"owned_by":"yandex"},
 #       {"id":"yandex/general:rc","object":"model","created":0,"owned_by":"yandex"},
 #       ...
-#       {"id":"salutespeech/general","object":"model","created":0,"owned_by":"salutespeech"},
-#       {"id":"salutespeech/callcenter","object":"model","created":0,"owned_by":"salutespeech"}
 #     ]}
 ```
 
-The model list is aggregated from every enabled provider. Since neither Yandex nor Salute expose a model catalogue API, the entries are static — they reflect the routing prefixes the proxy supports, not what the providers happen to accept on a given day. Use the `id` values in the `model` field of transcription requests.
+Since Yandex does not expose a model catalogue API, the entries are static. Use the `id` values in the `model` field of transcription requests.
+
+When `STT_PROXY_API_KEY` is set, add `Authorization: Bearer <key>` to every API request. The setting is optional for local use and must contain at least 32 characters when enabled.
 
 Interactive docs (Swagger UI) live at `http://127.0.0.1:8000/docs`.
 
@@ -260,11 +256,11 @@ Wire-compatible with the OpenAI Audio API. The request is `multipart/form-data`:
 | Field | Required | Description |
 |---|---|---|
 | `file` | yes | Audio file (binary) |
-| `model` | yes | Model id — used for routing. See [Provider routing](#provider-routing) |
-| `language` | no | ISO-639-1 (`ru`, `en`, ...) or BCP-47 (`ru-RU`, `en-US`, ...). Defaults to provider default. |
-| `prompt` | no | Optional hint text. Forwarded as vocabulary hints to SaluteSpeech; ignored by Yandex (the SDK has no first-class prompt slot). |
+| `model` | yes | Yandex model id. See [Yandex model names](#yandex-model-names) |
+| `language` | no | ISO-639-1 (`ru`, `en`, ...) or BCP-47 (`ru-RU`, `en-US`, ...). Defaults to Yandex's default. |
+| `prompt` | no | Optional hint text. Accepted for compatibility but ignored because the Yandex SDK has no first-class prompt slot. |
 | `response_format` | no | `json` (default), `text`, `verbose_json`, `srt`, `vtt`. `diarized_json` is rejected with 400. |
-| `temperature` | no | Sampling temperature. Accepted but not used by either provider. |
+| `temperature` | no | Sampling temperature. Accepted but not used by Yandex. |
 | `timestamp_granularities` | no | `word` and/or `segment`. Honored when present in `verbose_json` results. |
 
 #### `response_format=json` (default)
@@ -334,7 +330,8 @@ Errors follow the OpenAI envelope:
 
 | HTTP | When |
 |---|---|
-| `400` | Bad `response_format`, ambiguous `model` (both providers configured, no default, no prefix), unknown routed provider, empty upload |
+| `400` | Bad `response_format` or empty upload |
+| `401` | Missing or invalid Bearer token when `STT_PROXY_API_KEY` is configured |
 | `413` | File larger than 25 MB |
 | `422` | FastAPI form validation (missing required fields, bad types) |
 | `500` | Misconfiguration (provider credentials changed between load and call) |
@@ -342,16 +339,15 @@ Errors follow the OpenAI envelope:
 
 ---
 
-## Provider routing
+## Yandex model names
 
-The proxy decides which backend to call based on the request's `model` field:
+Every request goes to Yandex. The `model` field selects the upstream model tag:
 
 | `model` value | Routing |
 |---|---|
 | `yandex/*` | Yandex SpeechKit; the suffix becomes the upstream model tag (for example `yandex/general:rc` → `general:rc`) |
-| `salutespeech/*` | SaluteSpeech; the suffix is sent as `options.model` (for example `salutespeech/callcenter`) |
-| Legacy `yandex-*`, `yc-*`, `speechkit-*`, `salute-*`, `sber-*` | Kept for compatibility |
-| Anything else (e.g. `whisper-1`) | `STT_PROXY_DEFAULT_PROVIDER` if set, else the only configured provider (if there is exactly one), else 400 |
+| Legacy `yandex-*`, `yc-*`, `speechkit-*` | Kept for compatibility |
+| Anything else (for example `whisper-1`) | Uses `STT_PROXY_YANDEX_MODEL` |
 
 Examples:
 
@@ -361,18 +357,13 @@ curl -X POST .../v1/audio/transcriptions \
     -F model=yandex/general:rc \
     -F file=@speech.wav
 
-# SaluteSpeech
-curl -X POST .../v1/audio/transcriptions \
-    -F model=salutespeech/general \
-    -F file=@speech.wav
-
-# Use the default provider (configured via STT_PROXY_DEFAULT_PROVIDER or auto-detected)
+# Use the configured default Yandex model
 curl -X POST .../v1/audio/transcriptions \
     -F model=whisper-1 \
     -F file=@speech.wav
 ```
 
-Run `stt-proxy models` (or `stt-proxy models --json`) to inspect the curated catalogue. Provider APIs may accept additional model names; any non-empty suffix is passed through, so `salutespeech/<new-model>` does not require a tool release.
+Run `stt-proxy models` (or `stt-proxy models --json`) to inspect the curated catalogue. Yandex may accept additional model names; any non-empty `yandex/<model>` suffix is passed through.
 
 ---
 
@@ -380,7 +371,7 @@ Run `stt-proxy models` (or `stt-proxy models --json`) to inspect the curated cat
 
 OpenAI accepts: `flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm`.
 
-Both providers natively consume MP3, WAV and OGG/OPUS. When the upload is in another container (`mp4`, `webm`, `m4a`, `flac`, or unknown), the proxy transcodes it to **16 kHz mono WAV PCM16** with `ffmpeg` before calling the provider.
+Yandex natively consumes MP3, WAV and OGG/OPUS. When the upload is in another container (`mp4`, `webm`, `m4a`, `flac`, or unknown), the proxy transcodes it to **16 kHz mono WAV PCM16** with `ffmpeg` before calling Yandex.
 
 If `ffmpeg` is not installed and the upload is in a non-native container, the request fails with `500` and a helpful error message. Install `ffmpeg` (`brew install ffmpeg` / `apt install ffmpeg`) to fix this.
 
@@ -394,10 +385,10 @@ You can force transcoding for every upload by setting an environment flag — se
 |---|---|---|
 | `json` | always | `{"text": "..."}` |
 | `text` | always | raw string |
-| `verbose_json` | always | language / duration / segments / word timings when available |
-| `srt` | always | single block if provider gives no segments, otherwise one block per segment |
+| `verbose_json` | always | language / duration / segments / word timings; Yandex SpeechKit v3 supplies phrase and word timestamps |
+| `srt` | always | one block per timed provider segment; single-block fallback if timings are unavailable |
 | `vtt` | always | same as SRT, with `WEBVTT` header and `.` separator |
-| `diarized_json` | **rejected (400)** | neither backend returns speaker labels |
+| `diarized_json` | **rejected (400)** | Yandex does not return speaker labels |
 
 ---
 
@@ -414,8 +405,7 @@ stt-proxy/
 │   ├── router.py          # /v1/audio/transcriptions endpoint
 │   └── providers/
 │       ├── __init__.py
-│       ├── base.py        # abstract Provider + routing helpers
-│       ├── salute.py      # SaluteSpeech SDK wrapper
+│       ├── base.py        # abstract Provider + model helpers
 │       └── yandex.py      # Yandex AI Studio SDK wrapper
 ├── scripts/
 │   └── info.py            # `task dev:info` helper
@@ -457,7 +447,7 @@ task dev:add httpx
 # Add a dev dependency
 task dev:add --dev pytest-asyncio
 
-# Run tests (none yet, but the wiring is in place)
+# Run tests
 task dev:test
 
 # Wipe caches
@@ -479,31 +469,13 @@ STT_PROXY_HOST=127.0.0.1 STT_PROXY_PORT=9000 task dev:serve
 
 ## Troubleshooting
 
-### "No STT provider configured"
+### "Yandex SpeechKit is not configured"
 
-You started the server without setting any provider credentials. Copy `.env.example` to `.env`, fill in at least one provider's keys, and try again. The process exits with code `2` on purpose — there is no useful behaviour without a backend.
-
-### "Multiple STT providers configured but STT_PROXY_DEFAULT_PROVIDER is unset"
-
-You enabled both Yandex and SaluteSpeech, but your request `model` has no prefix and you didn't set `STT_PROXY_DEFAULT_PROVIDER`. Either:
-- set `STT_PROXY_DEFAULT_PROVIDER=yandex` (or `salute`) in `.env`, or
-- prefix the request `model` with `yandex-` or `salute-`.
+You started the server without both Yandex credentials. Copy `.env.example` to `.env`, fill in `STT_PROXY_YANDEX_API_KEY` and `STT_PROXY_YANDEX_FOLDER_ID`, and try again. The process exits with code `2` on purpose — there is no useful behaviour without a backend.
 
 ### "Yandex transcription failed: ... StatusCode.UNAUTHENTICATED"
 
 `STT_PROXY_YANDEX_API_KEY` is wrong or does not have the `ai.speechkit.stt` role in the specified folder. Verify both the key and the folder id at <https://console.yandex.cloud/>.
-
-### SaluteSpeech "TokenRequestError" / "401 Unauthorized"
-
-`STT_PROXY_SALUTESPEECH_KEY` is malformed. It must be the base64 of `client_id:client_secret` exactly as shown in SaluteSpeech Studio → Project → Authorization key. You can recreate it:
-
-```bash
-printf 'CLIENT_ID:CLIENT_SECRET' | base64
-```
-
-### SaluteSpeech SSL: "self-signed certificate in certificate chain"
-
-You're missing the Russian Ministry of Digital Development CA certificates. The `salute-speech` SDK normally installs them via `certifi`, but if you have a stripped-down Python install, follow the [official guide](https://developers.sber.ru/docs/ru/salutespeech/quick-start/certificates).
 
 ### Bad audio: "Unable to detect audio encoding"
 

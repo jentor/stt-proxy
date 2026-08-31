@@ -8,9 +8,8 @@ All environment variables are namespaced under ``STT_PROXY_`` (configured via
 ``Settings.model_config.env_prefix``):
 
   * ``STT_PROXY_HOST`` / ``STT_PROXY_PORT`` / ``STT_PROXY_LOG_LEVEL`` / ``STT_PROXY_WORKERS``
+  * ``STT_PROXY_API_KEY``
   * ``STT_PROXY_YANDEX_API_KEY`` / ``STT_PROXY_YANDEX_FOLDER_ID`` / ``STT_PROXY_YANDEX_MODEL``
-  * ``STT_PROXY_SALUTESPEECH_KEY``
-  * ``STT_PROXY_DEFAULT_PROVIDER``
 
 Two non-env sources are also supported, depending on which "view" the caller
 asks for (see :func:`load_settings`):
@@ -43,7 +42,7 @@ import os
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
 
 from pydantic import Field, model_validator
 from pydantic_settings import (
@@ -55,9 +54,6 @@ from pydantic_settings import (
 
 
 logger = logging.getLogger(__name__)
-
-
-ProviderName = Literal["yandex", "salute"]
 
 
 class Settings(BaseSettings):
@@ -129,6 +125,11 @@ class Settings(BaseSettings):
         ge=1,
         description="Number of uvicorn workers (1 recommended; provider SDKs may not be fork-safe)",
     )
+    api_key: str | None = Field(
+        default=None,
+        min_length=32,
+        description="Optional Bearer token required by every API route",
+    )
 
     # ---- Provider credentials ---------------------------------------------
     # Yandex SpeechKit: API key + folder ID are both required.
@@ -139,21 +140,6 @@ class Settings(BaseSettings):
     yandex_model: str = Field(
         default="general",
         description="Default Yandex STT model tag (general, general:rc, general:deprecated, deferred-general, ...)",
-    )
-
-    # SaluteSpeech: single base64-encoded "client_id:client_secret" token.
-    # See https://developers.sber.ru/docs/ru/salutespeech/rest/post-token
-    salutespeech_key: str | None = Field(
-        default=None,
-        description="Salute Speech authorization key: base64 of client_id:client_secret",
-    )
-
-    # ---- Routing -----------------------------------------------------------
-    # Default provider when the request `model` doesn't carry a routing prefix.
-    # If only one provider is configured, it is used regardless of this value.
-    default_provider: ProviderName | None = Field(
-        default=None,
-        description="Default provider: 'yandex' or 'salute'. If unset and both providers are configured, requests must use a prefixed model name.",
     )
 
     @model_validator(mode="after")
@@ -169,10 +155,6 @@ class Settings(BaseSettings):
             )
             self._yandex_enabled = False
 
-        # Salute is enabled when its single credential is present.
-        self._salute_enabled = bool(self.salutespeech_key)
-        self._salute_credentials = self.salutespeech_key
-
         return self
 
     # ---- Computed properties ----------------------------------------------
@@ -181,46 +163,8 @@ class Settings(BaseSettings):
         return getattr(self, "_yandex_enabled", False)
 
     @property
-    def salute_enabled(self) -> bool:
-        return getattr(self, "_salute_enabled", False)
-
-    @property
-    def salute_credentials(self) -> str | None:
-        return getattr(self, "_salute_credentials", None)
-
-    @property
-    def enabled_providers(self) -> list[ProviderName]:
-        providers: list[ProviderName] = []
-        if self.yandex_enabled:
-            providers.append("yandex")
-        if self.salute_enabled:
-            providers.append("salute")
-        return providers
-
-    def effective_default_provider(self) -> ProviderName | None:
-        """Resolve the provider used when a request's `model` has no routing prefix."""
-        if self.default_provider:
-            return self.default_provider
-        if len(self.enabled_providers) == 1:
-            return self.enabled_providers[0]
-        return None
-
-    def resolve_default_provider_or_fail(self) -> ProviderName:
-        """Same as effective_default_provider() but raises if no provider is configured."""
-        providers = self.enabled_providers
-        if not providers:
-            raise RuntimeError(
-                "No STT provider configured. Set STT_PROXY_YANDEX_API_KEY + STT_PROXY_YANDEX_FOLDER_ID for Yandex, "
-                "or STT_PROXY_SALUTESPEECH_KEY for Salute Speech."
-            )
-        default = self.effective_default_provider()
-        if default is None:
-            raise RuntimeError(
-                "Multiple STT providers configured but STT_PROXY_DEFAULT_PROVIDER is unset. "
-                "Either set STT_PROXY_DEFAULT_PROVIDER=yandex|salute, or use a prefixed model name "
-                "in requests (yandex-* / salute-*)."
-            )
-        return default
+    def enabled_providers(self) -> list[str]:
+        return ["yandex"] if self.yandex_enabled else []
 
 
 # Sentinel used to distinguish "caller passed nothing" from "caller passed None".
@@ -341,9 +285,8 @@ def load_settings(
         Settings._toml_file_override = None
     if validate and not settings.enabled_providers:
         msg = (
-            "No STT provider configured.\n"
-            "Set STT_PROXY_YANDEX_API_KEY + STT_PROXY_YANDEX_FOLDER_ID for Yandex SpeechKit, and/or\n"
-            "STT_PROXY_SALUTESPEECH_KEY for Salute Speech.\n"
+            "Yandex SpeechKit is not configured.\n"
+            "Set STT_PROXY_YANDEX_API_KEY and STT_PROXY_YANDEX_FOLDER_ID.\n"
             "Exiting."
         )
         print(msg, file=sys.stderr)

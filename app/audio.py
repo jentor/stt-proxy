@@ -1,15 +1,14 @@
 """Audio format detection and normalization.
 
 OpenAI's audio API accepts many container/codec combinations (flac, mp3, mp4,
-mpeg, mpga, m4a, ogg, wav, webm). The SaluteSpeech SDK auto-detects the codec
-from the bytes via pydub, but the Yandex SDK needs an explicit
-``AudioFormat`` hint (MP3, WAV, OGG_OPUS, PCM16).
+mpeg, mpga, m4a, ogg, wav, webm). Yandex SpeechKit accepts a smaller set and
+needs an explicit ``AudioFormat`` hint (MP3, WAV, OGG_OPUS, PCM16).
 
 This module:
   * detects the input format from filename / content-type
   * passes the bytes through when they match a natively supported container
   * transcodes to 16 kHz mono WAV PCM16 with ffmpeg as a fallback for
-    containers the providers cannot consume directly (mp4, webm, m4a, flac).
+    containers Yandex cannot consume directly (mp4, webm, m4a, flac).
 """
 
 from __future__ import annotations
@@ -124,7 +123,7 @@ def detect_format(
     return AudioFormat.UNKNOWN
 
 
-# Containers both Salute and Yandex accept without transcoding.
+# Containers Yandex accepts without transcoding.
 NATIVE_FORMATS: Final[frozenset[AudioFormat]] = frozenset(
     {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OGG}
 )
